@@ -25,7 +25,7 @@ TOOLS = [
         "key": "kibo",
         "page": "pages/1_Kibo_cancellations.py",
         "label": "Kibo cancellations",
-        "icon": "📦",
+        "icon": "🧾",
         "blurb": "Cancel an item, a shipment or a whole order in Kibo. "
                  "Queues into `input/`; the Cancellations workflow applies it.",
     },
@@ -34,9 +34,9 @@ TOOLS = [
         "page": "pages/2_Warehouse_cancellations.py",
         "label": "Warehouse cancellations",
         "icon": "📦",
-        "blurb": "Stop a shipment at the GXO warehouse. Name a product and the worker "
-                 "sends the event only if that product is the whole shipment, otherwise "
-                 "it cancels just that item in Kibo. Queues into `warehouse/input/`.",
+        "blurb": "Stop a shipment at the GXO warehouse. Name a product and the event "
+                 "is sent only if that product is the whole shipment. "
+                 "Queues into `warehouse/input/`.",
     },
 ]
 
