@@ -21,7 +21,7 @@ GitHub Actions workflows over there do the actual work.
 | Page | What it queues | Where |
 |---|---|---|
 | **Kibo cancellations** | An item, a shipment or a whole order to cancel in Kibo | `input/` |
-| **Warehouse cancellations** | A shipment to stop at the GXO warehouse. With a productId, the worker sends the event only if that product is the whole shipment; otherwise it cancels just that item in Kibo and tells the warehouse nothing | `warehouse/input/` |
+| **Warehouse cancellations** | A shipment to stop at the GXO warehouse. With a productId, the event is sent only if that product is the whole shipment; otherwise nothing is sent anywhere | `warehouse/input/` |
 
 Each page has the same four tabs: **Upload CSV**, **Single cancellation**,
 **Logs** and **Folders**. The Logs and Folders tabs only ever look at that
