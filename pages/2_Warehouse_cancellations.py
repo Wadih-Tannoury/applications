@@ -92,7 +92,7 @@ def product_rule_note() -> None:
         "- the shipment holds **other products too** → the warehouse is told nothing, and "
         "only that product is cancelled in Kibo, so the rest still ships.\n\n"
         "Either way the log says which of the two happened.",
-        icon="⟡",
+        icon="📦",
     )
 
 

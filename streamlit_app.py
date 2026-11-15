@@ -25,7 +25,7 @@ TOOLS = [
         "key": "kibo",
         "page": "pages/1_Kibo_cancellations.py",
         "label": "Kibo cancellations",
-        "icon": "⟡",
+        "icon": "📦",
         "blurb": "Cancel an item, a shipment or a whole order in Kibo. "
                  "Queues into `input/`; the Cancellations workflow applies it.",
     },
@@ -33,7 +33,7 @@ TOOLS = [
         "key": "warehouse",
         "page": "pages/2_Warehouse_cancellations.py",
         "label": "Warehouse cancellations",
-        "icon": "⟡",
+        "icon": "📦",
         "blurb": "Stop a shipment at the GXO warehouse. Name a product and the worker "
                  "sends the event only if that product is the whole shipment, otherwise "
                  "it cancels just that item in Kibo. Queues into `warehouse/input/`.",
@@ -79,12 +79,12 @@ def home() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Operational applications", page_icon="⟡", layout="centered")
+    st.set_page_config(page_title="Operational applications", page_icon="📦", layout="centered")
     page_style()
 
     login_gate("Operational applications.")
 
-    pages = [st.Page(home, title="Home", icon="⌂", default=True)]
+    pages = [st.Page(home, title="Home", icon="🏠", default=True)]
     allowed = set(accessible([tool["key"] for tool in TOOLS]))
     pages += [
         st.Page(tool["page"], title=tool["label"], icon=tool["icon"])
