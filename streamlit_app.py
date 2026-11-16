@@ -34,8 +34,7 @@ TOOLS = [
         "page": "pages/2_Warehouse_cancellations.py",
         "label": "Warehouse cancellations",
         "icon": "📦",
-        "blurb": "Stop a shipment at the GXO warehouse. Name a product and the event "
-                 "is sent only if that product is the whole shipment. "
+        "blurb": "Stop a whole shipment at the GXO warehouse. "
                  "Queues into `warehouse/input/`.",
     },
 ]
