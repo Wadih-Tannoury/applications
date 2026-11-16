@@ -39,6 +39,11 @@ DEFAULT_FOLDERS = {
 CSV_COLUMNS = ["shipmentOrderNumber", "productId", "orderNumber", "quantity",
                "reasonCode", "moreInfo"]
 
+# Columns every row has to carry. The cancellation reason is recorded against
+# the order in Kibo, so a row without one is refused here rather than sent with
+# a filler nobody chose.
+REQUIRED = {"reasonCode": "reasonCode", "moreInfo": "moreInfo"}
+
 ALIASES = {
     "shipmentordernumber": "shipmentOrderNumber",
     "son": "shipmentOrderNumber",
@@ -67,6 +72,22 @@ REASON_CODES = [
 ]
 
 
+def missing_required(rows: List[Dict[str, str]]) -> List[str]:
+    """Complaints about rows that cannot be sent as they stand."""
+    problems = []
+    for position, row in enumerate(rows, start=1):
+        absent = [label for column, label in REQUIRED.items() if not row.get(column)]
+        if not (row.get("shipmentOrderNumber") or row.get("orderNumber")):
+            absent.insert(0, "shipmentOrderNumber or orderNumber")
+        if absent:
+            label = (row.get("shipmentOrderNumber") or row.get("orderNumber")
+                     or "no order number")
+            problems.append(
+                f"Record {position} ({label}) is missing " + " and ".join(absent) + "."
+            )
+    return problems
+
+
 def unknown_prefixes(rows: List[Dict[str, str]]) -> List[str]:
     """Brand prefixes the worker will not be able to turn into a tenant."""
     found = set()
@@ -84,19 +105,21 @@ def unknown_prefixes(rows: List[Dict[str, str]]) -> List[str]:
 def tab_upload(github: GitHub, config, username: str) -> None:
     st.markdown("#### Upload a CSV")
     st.caption(
-        "Columns: shipmentOrderNumber, productId, orderNumber. "
-        "A productId cancels that item only; an empty productId cancels the whole shipment; "
-        "a row with only an orderNumber cancels every shipment of that order."
+        "Columns: shipmentOrderNumber, productId, orderNumber, quantity, and "
+        "reasonCode and moreInfo (both required — they are recorded on the cancellation "
+        "in Kibo). A productId cancels that item only; an empty productId cancels the "
+        "whole shipment; a row with only an orderNumber cancels every shipment of that "
+        "order."
     )
 
     uploaded = st.file_uploader("CSV file", type=["csv", "txt"], label_visibility="collapsed")
     if uploaded is None:
         with st.expander("Example file"):
             st.code(
-                "shipmentOrderNumber,productId,orderNumber\n"
-                "OW-USA00037769,518055266024613,\n"
-                "OW-USA00037770,,\n"
-                ",,OW-US-00037771\n",
+                "shipmentOrderNumber,productId,orderNumber,reasonCode,moreInfo\n"
+                "OW-USA00037769,518055266024613,,CustomerChangedTheirMind,Customer called\n"
+                "OW-USA00037770,,,No Inventory,Nothing left in Milan\n"
+                ",,OW-US-00037771,Fraud,Flagged by payments\n",
                 language="text",
             )
         return
@@ -129,6 +152,15 @@ def tab_upload(github: GitHub, config, username: str) -> None:
             "Those records will fail unless the prefix is added to the worker's tenant map, "
             "or the row carries a tenantId."
         )
+
+    blocking = missing_required(rows)
+    if blocking:
+        for problem in blocking:
+            st.error(problem)
+        st.caption(
+            "Fix the file and upload it again. Nothing is queued while a row is incomplete."
+        )
+        return
 
     if st.button("Queue these records", type="primary"):
         submit_rows(github, config, rows, CSV_COLUMNS, username,
@@ -170,8 +202,12 @@ def tab_single(github: GitHub, config, username: str) -> None:
             order_number = st.text_input("orderNumber", placeholder="OW-US-00037769")
 
         column_left, column_right = st.columns(2)
-        reason_code = column_left.selectbox("Reason code", REASON_CODES)
-        more_info = column_right.text_input("More info", value="Unspecified")
+        reason_code = column_left.selectbox("Reason code (required)", REASON_CODES)
+        more_info = column_right.text_input(
+            "More info (required)",
+            placeholder="why this is being cancelled",
+            help="Recorded on the cancellation in Kibo.",
+        )
 
         submitted = st.form_submit_button("Queue this cancellation", type="primary")
 
@@ -194,6 +230,9 @@ def tab_single(github: GitHub, config, username: str) -> None:
         return
     if quantity and not quantity.isdigit():
         st.error("The quantity has to be a whole number.")
+        return
+    if not more_info.strip():
+        st.error("Enter the more info text: it is recorded on the cancellation in Kibo.")
         return
 
     prefix = brand_prefix(shipment_order_number, order_number)
