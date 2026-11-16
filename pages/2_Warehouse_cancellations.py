@@ -37,8 +37,10 @@ DEFAULT_FOLDERS = {
     "error_dir": "warehouse/error",
 }
 
-CSV_COLUMNS = ["shipmentOrderNumber", "productId", "orderNumber", "quantity",
-               "reasonCode", "reasonMessage"]
+CSV_COLUMNS = ["shipmentOrderNumber", "productId", "orderNumber", "reasonMessage"]
+
+# Columns every row has to carry, with the label shown when one is missing.
+REQUIRED = {"shipmentOrderNumber": "shipmentOrderNumber", "reasonMessage": "reasonMessage"}
 
 ALIASES = {
     "shipmentordernumber": "shipmentOrderNumber",
@@ -50,10 +52,6 @@ ALIASES = {
     "ordernumber": "orderNumber",
     "externalorderid": "orderNumber",
     "externalordernumber": "orderNumber",
-    "quantity": "quantity",
-    "qty": "quantity",
-    "reasoncode": "reasonCode",
-    "reason": "reasonCode",
     "reasonmessage": "reasonMessage",
     "moreinfo": "reasonMessage",
     "tenantid": "tenantId",
@@ -61,6 +59,26 @@ ALIASES = {
 }
 
 DEFAULT_REASON_MESSAGE = "Kibo notification cancellation"
+
+
+def missing_required(rows: List[Dict[str, str]]) -> List[str]:
+    """
+    Complaints about rows that cannot be sent as they stand.
+
+    The warehouse event carries data.reasonMessage, and what it says is the only
+    explanation anyone downstream gets, so a row without one is refused here
+    rather than sent with a filler.
+    """
+    problems = []
+    for position, row in enumerate(rows, start=1):
+        absent = [label for column, label in REQUIRED.items() if not row.get(column)]
+        if absent:
+            problems.append(
+                f"Record {position} "
+                f"({row.get('shipmentOrderNumber') or 'no shipmentOrderNumber'}) "
+                "is missing " + " and ".join(absent) + "."
+            )
+    return problems
 
 
 def unknown_prefixes(rows: List[Dict[str, str]]) -> List[str]:
@@ -89,9 +107,9 @@ def product_rule_note() -> None:
         "row names a productId, the worker reads the shipment from Kibo first:\n\n"
         "- that product is the **only** product on the shipment → the cancellation goes to "
         "the warehouse;\n"
-        "- the shipment holds **other products too** → the warehouse is told nothing, and "
-        "only that product is cancelled in Kibo, so the rest still ships.\n\n"
-        "Either way the log says which of the two happened.",
+        "- the shipment holds **other products too** → **nothing happens at all**, here or "
+        "in Kibo, and the log says why.\n\n"
+        "The worker only reads from Kibo; it never cancels anything there.",
         icon="📦",
     )
 
@@ -99,8 +117,8 @@ def product_rule_note() -> None:
 def tab_upload(github: GitHub, config, username: str) -> None:
     st.markdown("#### Upload a CSV")
     st.caption(
-        "Columns: shipmentOrderNumber (required), productId, orderNumber, quantity, "
-        "reasonCode, reasonMessage. An empty productId cancels the whole shipment outright."
+        "Columns: shipmentOrderNumber (required), productId, orderNumber, reasonMessage. "
+        "An empty productId cancels the whole shipment outright."
     )
     product_rule_note()
 
@@ -108,10 +126,10 @@ def tab_upload(github: GitHub, config, username: str) -> None:
     if uploaded is None:
         with st.expander("Example file"):
             st.code(
-                "shipmentOrderNumber,productId,orderNumber\n"
-                "OW-USA00037769,,\n"
-                "OW-USA00037770,518055266024613,\n"
-                "DJ-ITA00012345,,DJ-IT-00012345\n",
+                "shipmentOrderNumber,productId,orderNumber,reasonMessage\n"
+                "OW-USA00037769,,,Kibo notification cancellation\n"
+                "OW-USA00037770,518055266024613,,Cancelled at source\n"
+                "DJ-ITA00012345,,DJ-IT-00012345,Customer changed their mind\n",
                 language="text",
             )
         return
@@ -132,7 +150,7 @@ def tab_upload(github: GitHub, config, username: str) -> None:
     preview = [
         dict(
             row,
-            scope="depends on the product" if row.get("productId") else "whole shipment",
+            scope="product-gated" if row.get("productId") else "whole shipment",
             tenant=(
                 BRAND_TENANTS.get(
                     brand_prefix(row.get("shipmentOrderNumber", ""), row.get("orderNumber", "")),
@@ -148,8 +166,8 @@ def tab_upload(github: GitHub, config, username: str) -> None:
 
     gated = sum(1 for row in rows if row.get("productId"))
     st.caption(
-        f"{len(rows)} record(s) ready — {len(rows) - gated} cancel the whole shipment at the "
-        f"warehouse, {gated} depend on what else is on the shipment."
+        f"{len(rows)} record(s) ready — {len(rows) - gated} cancel the whole shipment "
+        f"outright, {gated} only if the product is the whole shipment."
     )
 
     unknown = unknown_prefixes(rows)
@@ -159,6 +177,15 @@ def tab_upload(github: GitHub, config, username: str) -> None:
             + ", ".join(unknown)
             + ". Those records will fail unless the prefix is added to the worker's tenant map."
         )
+
+    blocking = missing_required(rows)
+    if blocking:
+        for problem in blocking:
+            st.error(problem)
+        st.caption(
+            "Fix the file and upload it again. Nothing is queued while a row is incomplete."
+        )
+        return
 
     if st.button("Queue these records", type="primary"):
         submit_rows(github, config, rows, CSV_COLUMNS, username,
@@ -171,7 +198,7 @@ def tab_single(github: GitHub, config, username: str) -> None:
 
     scope = st.radio(
         "What do you want to cancel?",
-        ["The whole shipment", "One product (the worker decides where it lands)"],
+        ["The whole shipment", "Only if one product is the whole shipment"],
         horizontal=False,
     )
     if scope != "The whole shipment":
@@ -194,7 +221,11 @@ def tab_single(github: GitHub, config, username: str) -> None:
                 help="Used to read the shipment from Kibo. Left empty, the worker derives it "
                      "from the shipmentOrderNumber.",
             )
-        reason_message = st.text_input("Reason message", value=DEFAULT_REASON_MESSAGE)
+        reason_message = st.text_input(
+            "Reason message (required)",
+            placeholder=DEFAULT_REASON_MESSAGE,
+            help="Goes out as data.reasonMessage on the warehouse event.",
+        )
         submitted = st.form_submit_button("Queue this cancellation", type="primary")
 
     if not submitted:
@@ -206,6 +237,9 @@ def tab_single(github: GitHub, config, username: str) -> None:
 
     if not shipment_order_number:
         st.error("Enter a shipmentOrderNumber.")
+        return
+    if not reason_message.strip():
+        st.error("Enter a reason message: it is what the warehouse event carries.")
         return
     if scope != "The whole shipment" and not product_id:
         st.error("Enter a productId, or switch to cancelling the whole shipment.")
@@ -230,9 +264,7 @@ def tab_single(github: GitHub, config, username: str) -> None:
                 "shipmentOrderNumber": shipment_order_number,
                 "productId": product_id,
                 "orderNumber": order_number,
-                "quantity": "",
-                "reasonCode": "",
-                "reasonMessage": reason_message.strip() or DEFAULT_REASON_MESSAGE,
+                "reasonMessage": reason_message.strip(),
             }
         ],
         CSV_COLUMNS,
