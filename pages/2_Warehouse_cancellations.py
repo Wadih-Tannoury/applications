@@ -130,7 +130,7 @@ def tab_upload(github: GitHub, config, username: str) -> None:
         )
         return
 
-    if st.button("Queue these records", type="primary"):
+    if st.button("Submit Cancellations", type="primary"):
         submit_rows(github, config, rows, CSV_COLUMNS, username,
                     uploaded.name.rsplit(".", 1)[0], "Warehouse cancellation request")
 
@@ -149,7 +149,7 @@ def tab_single(github: GitHub, config, username: str) -> None:
             placeholder=DEFAULT_REASON_MESSAGE,
             help="Goes out as data.reasonMessage on the warehouse event.",
         )
-        submitted = st.form_submit_button("Queue this cancellation", type="primary")
+        submitted = st.form_submit_button("Submit Cancellation", type="primary")
 
     if not submitted:
         return
