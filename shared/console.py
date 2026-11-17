@@ -41,6 +41,18 @@ BRAND_TENANTS = {
 }
 
 
+# The canceledReason.reasonCode values Kibo records on a cancellation. Both
+# consoles offer the same list: the Kibo page for its own cancellations, the
+# Warehouse page for the Kibo step that can follow a warehouse cancellation.
+REASON_CODES = [
+    "CustomerChangedTheirMind",
+    "No Inventory",
+    "Fraud",
+    "Damaged",
+    "Other",
+]
+
+
 def brand_prefix(*values: str) -> str:
     for value in values:
         text = str(value or "").strip().upper()
