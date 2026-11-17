@@ -30,7 +30,13 @@ The Warehouse page opens on a choice, on both of its entry tabs:
 | **Warehouse only** | `cancelInKibo=no`. The CANCEL event stops the shipment at the warehouse; Kibo is left as it is. |
 | **Warehouse, then Kibo** | `cancelInKibo=yes`. The worker sends the warehouse event first and cancels the whole shipment in Kibo only once the warehouse has accepted it. If the warehouse event fails, nothing is cancelled in Kibo. |
 
-A `cancelInKibo` column in an uploaded file wins over the choice, row by row.
+The choice covers the whole upload: one file, one decision. It is written into
+the `cancelInKibo` column of the queued CSV for every row.
+
+The page asks for `reasonCode` and `moreInfo` — what Kibo records against a
+cancellation — only when *Warehouse, then Kibo* is chosen, and requires them
+there. The warehouse event itself always goes out with `reasonMessage`
+`Cancelled`, so nothing asks for one.
 
 Each page has the same four tabs: **Upload CSV**, **Single cancellation**,
 **Logs** and **Folders**. The Logs and Folders tabs only ever look at that
