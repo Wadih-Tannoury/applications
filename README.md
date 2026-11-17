@@ -21,7 +21,16 @@ GitHub Actions workflows over there do the actual work.
 | Page | What it queues | Where |
 |---|---|---|
 | **Kibo cancellations** | An item, a shipment or a whole order to cancel in Kibo | `input/` |
-| **Warehouse cancellations** | A whole shipment to stop at the GXO warehouse. The event has no item granularity, so this page deals in shipments only — a single item is the Kibo page's job | `warehouse/input/` |
+| **Warehouse cancellations** | A whole shipment to stop at the GXO warehouse, and optionally in Kibo after it. The event has no item granularity, so this page deals in shipments only — a single item is the Kibo page's job | `warehouse/input/` |
+
+The Warehouse page opens on a choice, on both of its entry tabs:
+
+| Option | What is queued |
+|---|---|
+| **Warehouse only** | `cancelInKibo=no`. The CANCEL event stops the shipment at the warehouse; Kibo is left as it is. |
+| **Warehouse, then Kibo** | `cancelInKibo=yes`. The worker sends the warehouse event first and cancels the whole shipment in Kibo only once the warehouse has accepted it. If the warehouse event fails, nothing is cancelled in Kibo. |
+
+A `cancelInKibo` column in an uploaded file wins over the choice, row by row.
 
 Each page has the same four tabs: **Upload CSV**, **Single cancellation**,
 **Logs** and **Folders**. The Logs and Folders tabs only ever look at that
