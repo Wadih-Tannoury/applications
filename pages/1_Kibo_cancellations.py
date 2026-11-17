@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from shared.console import (  # noqa: E402
     BRAND_TENANTS,
+    REASON_CODES,
     GitHub,
     brand_prefix,
     parse_uploaded_csv,
@@ -62,15 +63,6 @@ ALIASES = {
     "tenantid": "tenantId",
     "siteid": "siteId",
 }
-
-REASON_CODES = [
-    "CustomerChangedTheirMind",
-    "No Inventory",
-    "Fraud",
-    "Damaged",
-    "Other",
-]
-
 
 def missing_required(rows: List[Dict[str, str]]) -> List[str]:
     """Complaints about rows that cannot be sent as they stand."""
