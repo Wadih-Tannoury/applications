@@ -21,22 +21,13 @@ GitHub Actions workflows over there do the actual work.
 | Page | What it queues | Where |
 |---|---|---|
 | **Kibo cancellations** | An item, a shipment or a whole order to cancel in Kibo | `input/` |
-| **Warehouse cancellations** | A whole shipment to stop at the GXO warehouse, and optionally in Kibo after it. The event has no item granularity, so this page deals in shipments only — a single item is the Kibo page's job | `warehouse/input/` |
+| **Warehouse cancellations** | A whole shipment to stop at the GXO warehouse, and nothing else. The event has no item granularity, so this page deals in shipments only — a single item, or anything in Kibo, is the Kibo page's job | `warehouse/input/` |
 
-The Warehouse page opens on a choice, on both of its entry tabs:
-
-| Option | What is queued |
-|---|---|
-| **Warehouse only** | `cancelInKibo=no`. The CANCEL event stops the shipment at the warehouse; Kibo is left as it is. |
-| **Warehouse, then Kibo** | `cancelInKibo=yes`. The worker sends the warehouse event first and cancels the whole shipment in Kibo only once the warehouse has accepted it. If the warehouse event fails, nothing is cancelled in Kibo. |
-
-The choice covers the whole upload: one file, one decision. It is written into
-the `cancelInKibo` column of the queued CSV for every row.
-
-The page asks for `reasonCode` and `moreInfo` — what Kibo records against a
-cancellation — only when *Warehouse, then Kibo* is chosen, and requires them
-there. The warehouse event itself always goes out with `reasonMessage`
-`Cancelled`, so nothing asks for one.
+The Warehouse page asks for one thing, the `shipmentOrderNumber`, on both of
+its entry tabs. Every row is queued with `cancelInKibo=no`, so the shipment is
+left untouched in Kibo whatever the workflow's own Kibo switch is set to, and
+the warehouse event always goes out with `reasonMessage` `Cancelled`, which is
+why nothing asks for one.
 
 Each page has the same four tabs: **Upload CSV**, **Single cancellation**,
 **Logs** and **Folders**. The Logs and Folders tabs only ever look at that
