@@ -186,6 +186,55 @@ def accessible(app_keys: List[str]) -> List[str]:
     return [key for key in app_keys if has_access(key)]
 
 
+# ---------------------------------------------------------------------------
+# Staging pages
+# ---------------------------------------------------------------------------
+# A staging page is a working copy of a live page, open to a named person and to
+# nobody else. It is where a change to a flow is tried before it reaches the
+# users' version, so it must not follow the ordinary access rules: the
+# administrator wildcard "*" deliberately does NOT reach it, or every
+# administrator would be walked into a half-finished page.
+#
+# The names come from `[staging] users = [...]` in the secrets, falling back to
+# the one below so the page works before anyone configures it.
+STAGING_USERS_DEFAULT = ("Wadih",)
+
+
+def staging_users() -> List[str]:
+    """The usernames allowed on staging pages."""
+    section = dict(st.secrets.get("staging", {}))
+    raw = section.get("users", list(STAGING_USERS_DEFAULT))
+    if isinstance(raw, str):
+        # A single name, or a comma separated list, written without brackets.
+        raw = [part for part in raw.split(",")]
+    return [str(name).strip() for name in raw if str(name).strip()]
+
+
+def is_staging_user(username: str = "") -> bool:
+    """
+    Is the signed-in person allowed on the staging pages?
+
+    Compared case-insensitively, because a login typed as 'wadih' is the same
+    person as one typed as 'Wadih' and being locked out of your own staging
+    page by a capital letter helps nobody.
+    """
+    name = (username or st.session_state.get("username", "")).strip().lower()
+    if not name:
+        return False
+    return name in {allowed.lower() for allowed in staging_users()}
+
+
+def require_staging(label: str) -> None:
+    """Stop the page when the signed-in user is not a staging user."""
+    if is_staging_user():
+        return
+    st.error(
+        f"{label} is a staging page. It is open to its owner only; everyone else "
+        "uses the live page in the sidebar."
+    )
+    st.stop()
+
+
 def require_access(app_key: str, label: str) -> None:
     """Stop the page when the signed-in user is not allowed on it."""
     if has_access(app_key):
@@ -439,20 +488,29 @@ def page_style() -> None:
 
 
 def start_page(title: str, config: Optional[Settings] = None,
-               caption: str = "", app_key: str = "", label: str = "") -> str:
+               caption: str = "", app_key: str = "", label: str = "",
+               staging: bool = False) -> str:
     """
     Style, sign-in, access check and the header every console page opens with.
 
     Passing app_key makes the page refuse a user who is not allowed on it, even
     if they reach it by its URL rather than through the sidebar.
+
+    staging=True checks the staging list instead, and app_key is then only used
+    to pick the page's secrets section. The two checks are exclusive on purpose:
+    a staging page must not be reachable by being an administrator.
     """
     page_style()
     username = login_gate()
-    if app_key:
+    if staging:
+        require_staging(label or title)
+    elif app_key:
         require_access(app_key, label or title)
     header_left, header_right = st.columns([4, 1])
     header_left.markdown(f"## {title}")
-    if is_admin():
+    if staging:
+        header_right.caption("staging")
+    elif is_admin():
         header_right.caption("admin")
     if config is not None:
         header_left.caption(

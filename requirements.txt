@@ -1,3 +1,7 @@
 # Dependencies for every console in this repository
 streamlit==1.40.2
 requests==2.32.3
+
+# The Cancellation ledger page reads BigQuery directly; the other pages do not
+# need this and the app still starts without it, with that page reporting why.
+google-cloud-bigquery==3.27.0
