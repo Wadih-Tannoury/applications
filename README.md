@@ -22,6 +22,8 @@ GitHub Actions workflows over there do the actual work.
 |---|---|---|
 | **Kibo cancellations** | An item, a shipment or a whole order to cancel in Kibo | `input/` |
 | **Warehouse cancellations** | A whole shipment to stop at the GXO warehouse, and nothing else. The event has no item granularity, so this page deals in shipments only — a single item, or anything in Kibo, is the Kibo page's job | `warehouse/input/` |
+| **Cancellation ledger** | Nothing. It is the read-only window onto what the warehouse cancellations have done | reads BigQuery |
+| **Warehouse cancellations (staging)** | The same as the Warehouse page. A working copy, open to its owner only, where a change to the flow is tried first | `warehouse/input/` |
 
 The Warehouse page asks for one thing, the `shipmentOrderNumber`, on both of
 its entry tabs. Every row is queued with `cancelInKibo=no`, so the shipment is
@@ -29,9 +31,41 @@ left untouched in Kibo whatever the workflow's own Kibo switch is set to, and
 the warehouse event always goes out with `reasonMessage` `Cancelled`, which is
 why nothing asks for one.
 
-Each page has the same four tabs: **Upload CSV**, **Single cancellation**,
-**Logs** and **Folders**. The Logs and Folders tabs only ever look at that
-tool's own folders, so the two queues never show each other's files.
+The two queueing pages have the same four tabs: **Upload CSV**, **Single
+cancellation**, **Logs** and **Folders**. The Logs and Folders tabs only ever
+look at that tool's own folders, so the two queues never show each other's
+files.
+
+### Cancellation ledger
+
+Shows `tlg-business-intelligence-prd`.til.warehouse_orders_cancellation_table —
+a row per shipment the operational_tools repository has cancelled at the GXO
+warehouse, and what became of it since. One row per shipment, with the columns
+the table holds and a **Stage** telling you where it has got to:
+
+| Stage | Meaning |
+|---|---|
+| Not sent | On the ledger, but the CANCEL event never reached the warehouse |
+| Awaiting the warehouse | Sent; no CANCELLED event back yet |
+| To cancel in Kibo | The warehouse confirmed it; the Kibo shipment is still open |
+| Done | Cancelled at the warehouse and in Kibo |
+
+A row awaiting the warehouse for more than 24 hours is marked ⚠ — the same
+window the Reconcile cancellations workflow uses, so an overdue row is one that
+workflow will resend on its next run.
+
+**The table is read afresh on every run of the page script**, which Streamlit
+does on sign-in, on refresh and whenever a filter changes. Nothing is cached, so
+what is on screen is what BigQuery held at the moment the page drew, and the
+footer says when that was. One query per page view is what this costs; if that
+ever matters, `fetch_rows` in `shared/ledger.py` is the single place to put a
+`ttl` on.
+
+Filtering by period and search runs in BigQuery rather than in the page, so a
+long ledger is never shipped here in full; the Stage filter then narrows what
+came back. The page reads and nothing else: it has no write path to the ledger
+at all, and the service account it signs in with should have no write role
+either.
 
 ## Who can open what
 
@@ -69,7 +103,10 @@ adding an `[auth.<new_app>]` section — the administrator needs no change.
 streamlit_app.py                     the front door: sign-in, access, navigation
 pages/1_Kibo_cancellations.py        one file per tool, the order is the sidebar order
 pages/2_Warehouse_cancellations.py
+pages/3_Cancellation_ledger.py
+pages/4_Warehouse_cancellations_staging.py   a copy of page 2, on purpose: see Staging below
 shared/console.py                    sign-in and access, GitHub client, CSV plumbing, Logs and Folders tabs
+shared/ledger.py                     the BigQuery read behind the Cancellation ledger page
 tools/make_password_hash.py          generates the login hashes
 .streamlit/secrets.toml.example      what the deployment needs
 requirements.txt
@@ -93,8 +130,16 @@ entry form and its queue folders. Everything else comes from `shared/console.py`
    - `[kibo]` and `[warehouse]`: the queue folders of each tool. The defaults in
      the code already match the repository layout, so these sections are only
      needed if you move a queue.
-   - `[auth]`: the administrator; `[auth.kibo]` and `[auth.warehouse]`: the
-     per-app users. See *Who can open what* above.
+   - `[auth]`: the administrator; `[auth.kibo]`, `[auth.warehouse]` and
+     `[auth.ledger]`: the per-app users. See *Who can open what* above.
+   - `[staging] users`: who may open the staging pages. Defaults to `Wadih`
+     when the section is absent. See *Staging* below.
+   - `[bigquery]`: the service-account JSON for the Cancellation ledger page,
+     pasted field by field. It needs `roles/bigquery.dataViewer` on
+     `tlg-business-intelligence-prd.til` and `roles/bigquery.jobUser` on the
+     project — **and no write role**, so the console cannot alter the ledger
+     even by accident. Without this section every other page still works and
+     the ledger page says what is missing.
 4. Deploy. The first load takes a few seconds; the app sleeps after a long idle
    and wakes on the next visit.
 
@@ -105,6 +150,44 @@ pip install -r requirements.txt
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml   # then edit it
 streamlit run streamlit_app.py
 ```
+
+## Staging
+
+`pages/4_Warehouse_cancellations_staging.py` is a **standalone copy** of the
+warehouse page, not a variant of it. Nothing imports it and it imports nothing
+from page 2, so it can be rewritten, broken and rewritten again without any of
+that reaching the people using the live page. That duplication is the point: a
+staging page that shared code with the live one could not be changed freely,
+which is the only thing it is for.
+
+**Who sees it.** The `[staging] users` list in the secrets, and nobody else.
+Being an administrator is deliberately not enough — `"*"` does not reach a
+staging page, or every administrator would be walked into a half-finished one.
+An administrator who is not on the list does not see it in the sidebar and is
+refused if they reach it by its URL. There is no `[auth.<app>]` section for it
+and granting its key does nothing.
+
+**Where it writes.** With no `[warehouse_staging]` section in the secrets it
+follows the live page exactly: same repository, same branch, same
+`warehouse/input/`. A submission there is a **real cancellation**, picked up by
+the production workflow and really stopped at GXO — which is what makes it a
+test of the flow rather than a rehearsal of it. The page carries a banner naming
+the queue it is about to write to. To isolate it instead, add a
+`[warehouse_staging]` section with its own `branch` or folders; note that a
+folder the warehouse workflow does not watch means nothing ever processes what
+lands there.
+
+**Promoting a change.** Once it has proved itself, the staging file becomes the
+live one:
+
+```bash
+cp pages/4_Warehouse_cancellations_staging.py pages/2_Warehouse_cancellations.py
+```
+
+then put back the four lines that differ — the docstring, `APP_KEY`, `STAGING`
+and the `start_page` call — each marked `STAGING:` in the file. Keep the staging
+copy where it is; it is the starting point for the next change, not a branch to
+delete.
 
 ## Adding a tool
 
