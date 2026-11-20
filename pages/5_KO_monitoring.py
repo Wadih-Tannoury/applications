@@ -64,8 +64,8 @@ HEADLINE_COLUMNS = [
 EVIDENCE_COLUMNS = [
     "gxo_resolved_date", "ko_status", "source", "brand",
     "eligibleForPackageClosure",
-    "label_SHPLBL_populated", "label_SHPLBL_is_zpl", "label_RETLBL_present",
-    "label_RETLBL_populated", "label_RETLBL_is_zpl",
+    "label_SHPLBL_populated", "label_SHPLBL_format", "label_RETLBL_present",
+    "label_RETLBL_populated", "label_RETLBL_format",
     "shipping_tracking_number", "return_tracking_number",
     "doc_INV_populated", "doc_RPI_populated",
     "api_http_status", "api_message", "api_create_error", "api_called_at",
@@ -187,7 +187,12 @@ def tab_dashboard(config) -> None:
             return pd.Series(False, index=frame.index)
         return frame[column].str.strip().ne("")
 
-    fixed = flag("ko_fix_date")
+    # ko_fixed and ko_fix_date are written together and never disagree, but
+    # reading both means an older row that predates the column still counts.
+    fixed = flag("ko_fix_date") | (
+        frame["ko_fixed"].str.strip().str.lower().isin(("yes", "true", "1"))
+        if "ko_fixed" in frame else pd.Series(False, index=frame.index)
+    )
     tried = flag("last_tried_by_gxo_date")
     errored = flag("get_documents_error")
     resolved = (
@@ -227,9 +232,9 @@ def tab_dashboard(config) -> None:
     elif shown_state == "Resolved only":
         shown = shown[resolved]
     if state == "Fixed":
-        shown = shown[shown["ko_fix_date"].str.strip().ne("")]
+        shown = shown[fixed.reindex(shown.index, fill_value=False)]
     elif state == "Still KO":
-        shown = shown[shown["ko_fix_date"].str.strip().eq("")]
+        shown = shown[~fixed.reindex(shown.index, fill_value=False)]
     if actions:
         shown = shown[shown["Action"].isin(actions)]
     if codes:
@@ -257,7 +262,7 @@ def tab_dashboard(config) -> None:
 
     if len(shown):
         left, right = st.columns(2)
-        still = shown[shown["ko_fix_date"].str.strip().eq("")] if "ko_fix_date" in shown else shown
+        still = shown[~fixed.reindex(shown.index, fill_value=False)]
         with left:
             st.markdown("###### Still KO, by action")
             breakdown(still, "Action", "Action")

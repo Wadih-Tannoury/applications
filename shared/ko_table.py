@@ -65,10 +65,10 @@ COLUMNS: List[Tuple[str, str]] = [
     ("brand", "brand"),
     ("eligible_for_package_closure", "eligibleForPackageClosure"),
     ("label_shplbl_populated", "label_SHPLBL_populated"),
-    ("label_shplbl_is_zpl", "label_SHPLBL_is_zpl"),
+    ("label_shplbl_format", "label_SHPLBL_format"),
     ("label_retlbl_present", "label_RETLBL_present"),
     ("label_retlbl_populated", "label_RETLBL_populated"),
-    ("label_retlbl_is_zpl", "label_RETLBL_is_zpl"),
+    ("label_retlbl_format", "label_RETLBL_format"),
     ("shipping_tracking_number", "shipping_tracking_number"),
     ("return_tracking_number", "return_tracking_number"),
     ("doc_inv_populated", "doc_INV_populated"),
@@ -87,8 +87,8 @@ COLUMNS: List[Tuple[str, str]] = [
 
 BOOL_COLUMNS = {
     "ko_fixed", "gxo_resolved", "eligibleForPackageClosure",
-    "label_SHPLBL_populated", "label_SHPLBL_is_zpl", "label_RETLBL_present",
-    "label_RETLBL_populated", "label_RETLBL_is_zpl",
+    "label_SHPLBL_populated", "label_RETLBL_present",
+    "label_RETLBL_populated",
     "doc_INV_populated", "doc_RPI_populated",
 }
 
