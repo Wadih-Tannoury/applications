@@ -9,4 +9,4 @@ google-cloud-bigquery==3.27.0
 
 # KO monitoring filters and shows its dataset as a DataFrame. Streamlit pulls
 # pandas in anyway; naming it here keeps that from being an accident.
-pandas==2.2.3
+pandas
