@@ -49,6 +49,11 @@ BQ_SCOPES = ["https://www.googleapis.com/auth/bigquery"]
 COLUMNS: List[Tuple[str, str]] = [
     ("shipment_order_number", "Shipment"),
     ("shipment_items", "Items"),
+    # Why the cancellation was raised, as the console recorded it. A ledger
+    # that predates these columns selects them as NULL and the dashboard says
+    # so, rather than failing.
+    ("reason_code", "Reason"),
+    ("more_info", "More info"),
     ("cancellation_sent_to_warehouse", "Sent"),
     ("cancellation_sent_to_warehouse_date", "Sent at"),
     ("cancellation_confirmed_by_warehouse", "Confirmed"),

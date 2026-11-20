@@ -23,6 +23,11 @@ moreInfo is optional and goes to Kibo empty when nobody fills it in, except on
 "Other", where an empty moreInfo would tell Kibo nothing: there it is sent as
 "Other" too.
 
+The **Warehouse Cancellation Dashboard** tab is the cancellation ledger, which
+used to be a page of its own: queueing a cancellation and watching what became
+of it are the same job, and having them apart meant leaving one to check the
+other. It is read-only.
+
 The warehouse event stops a whole shipment and carries an empty products array:
 it has no item granularity, so this console deals in shipments only. Cancelling
 a single item is the Kibo cancellations page's job too.
@@ -37,6 +42,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from shared import ledger_view  # noqa: E402
 from shared.console import (  # noqa: E402
     GitHub,
     parse_uploaded_csv,
@@ -301,9 +307,13 @@ def main() -> None:
                           app_key=APP_KEY, label="Warehouse cancellations")
     github = GitHub(config)
 
-    upload, single, logs, queue = st.tabs(
-        ["Upload CSV", "Single cancellation", "Logs", "Folders"]
+    dashboard, upload, single, logs, queue = st.tabs(
+        [ledger_view.LABEL, "Upload CSV", "Single cancellation", "Logs", "Folders"]
     )
+    # The dashboard comes first: most visits are to see what became of a
+    # cancellation, not to raise one.
+    with dashboard:
+        ledger_view.render("warehouse_ledger")
     with upload:
         tab_upload(github, config, username)
     with single:

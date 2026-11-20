@@ -38,16 +38,9 @@ TOOLS = [
         "page": "pages/2_Warehouse_cancellations.py",
         "label": "Warehouse cancellations",
         "icon": "📦",
-        "blurb": "Stop a whole shipment at the GXO warehouse. "
-                 "Queues into `warehouse/input/`.",
-    },
-    {
-        "key": "ledger",
-        "page": "pages/3_Cancellation_ledger.py",
-        "label": "Cancellation ledger",
-        "icon": "📒",
-        "blurb": "Every shipment cancelled at the warehouse and what became of it. "
-                 "Read-only, straight from BigQuery.",
+        "blurb": "Stop a whole shipment at the GXO warehouse, with the reason Kibo "
+                 "will record. The Warehouse Cancellation Dashboard tab shows every "
+                 "cancellation and what became of it.",
     },
     {
         "key": "ko_monitoring",
