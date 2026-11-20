@@ -260,18 +260,35 @@ def tab_dashboard(config) -> None:
         still = shown[shown["ko_fix_date"].str.strip().eq("")] if "ko_fix_date" in shown else shown
         with left:
             st.markdown("###### Still KO, by action")
-            if len(still) and "Action" in still.columns:
-                st.bar_chart(still["Action"].replace("", "—").value_counts(),
-                             horizontal=True, color="#d9534f")
-            else:
-                st.caption("Nothing is still KO in this selection.")
+            breakdown(still, "Action", "Action")
         with right:
             st.markdown("###### Why a shipment is still KO")
-            if len(still) and "ko_status" in still.columns:
-                st.bar_chart(still["ko_status"].replace("", "—").value_counts(),
-                             horizontal=True, color="#f0ad4e")
-            else:
-                st.caption("Nothing is still KO in this selection.")
+            breakdown(still, "ko_status", "Reason")
+
+
+def breakdown(frame: pd.DataFrame, column: str, heading: str, limit: int = 12) -> None:
+    """
+    A count per value, with a bar, as a native table.
+
+    Deliberately not st.bar_chart: that imports altair, and altair 5.5 does not
+    import at all on the Python 3.14 that Streamlit Cloud now runs. A dataframe
+    with a ProgressColumn needs nothing but Streamlit itself, reads as well at
+    this size, and the numbers are legible rather than inferred from a bar.
+    """
+    if not len(frame) or column not in frame.columns:
+        st.caption("Nothing is still KO in this selection.")
+        return
+    counts = frame[column].replace("", "—").value_counts().head(limit)
+    table = pd.DataFrame({heading: counts.index, "Shipments": counts.values})
+    st.dataframe(
+        table, hide_index=True, use_container_width=True,
+        column_config={
+            "Shipments": st.column_config.ProgressColumn(
+                "Shipments", format="%d", min_value=0,
+                max_value=int(counts.max()) if len(counts) else 1,
+            )
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
