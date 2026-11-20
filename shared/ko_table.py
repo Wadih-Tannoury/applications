@@ -52,8 +52,8 @@ COLUMNS: List[Tuple[str, str]] = [
     ("shipment_created_effective", "Shipment created (effective)"),
     ("action", "Action"),
     ("active_task", "Active task"),
-    ("is_ko", "is_ko"),
     ("gxo_ko_reason", "GXO KO reason"),
+    ("ko_fixed", "ko_fixed"),
     ("ko_fix_date", "ko_fix_date"),
     ("last_tried_by_gxo_date", "last_tried_by_gxo_date"),
     ("get_documents_error", "get_documents_error"),
@@ -86,7 +86,7 @@ COLUMNS: List[Tuple[str, str]] = [
 ]
 
 BOOL_COLUMNS = {
-    "is_ko", "gxo_resolved", "eligibleForPackageClosure",
+    "ko_fixed", "gxo_resolved", "eligibleForPackageClosure",
     "label_SHPLBL_populated", "label_SHPLBL_is_zpl", "label_RETLBL_present",
     "label_RETLBL_populated", "label_RETLBL_is_zpl",
     "doc_INV_populated", "doc_RPI_populated",

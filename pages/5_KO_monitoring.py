@@ -55,8 +55,8 @@ HEADLINE_COLUMNS = [
     "shipmentOrderNumber", "OERODP", "ub_imko", "Logistic order",
     "OMS shipment #", "Order date", "Shipment created",
     "Shipment created (effective)", "Action", "Active task",
-    "is_ko", "GXO KO reason",
-    "ko_fix_date", "last_tried_by_gxo_date", "get_documents_error",
+    "GXO KO reason",
+    "ko_fixed", "ko_fix_date", "last_tried_by_gxo_date", "get_documents_error",
     "gxo_resolved",
 ]
 
