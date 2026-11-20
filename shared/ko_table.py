@@ -189,10 +189,14 @@ def fetch(limit: int = 20000) -> Read:
         ))
 
     missing = [column for column, _ in COLUMNS if column not in present]
+    # Selected under their real names, never aliased to the headings: a
+    # BigQuery field name takes only letters, digits and underscores, so
+    # `OMS shipment #` and `Shipment created (effective)` are rejected outright
+    # as aliases. The renaming to headings happens below, in pandas.
     selects = [
-        (f"`{column}` AS `{heading}`" if column in present
-         else f"CAST(NULL AS STRING) AS `{heading}`")
-        for column, heading in COLUMNS
+        (f"`{column}`" if column in present
+         else f"CAST(NULL AS STRING) AS `{column}`")
+        for column, _ in COLUMNS
     ]
     order = ("row_last_modified_date" if "row_last_modified_date" in present
              else "shipment_order_number")
@@ -212,7 +216,8 @@ def fetch(limit: int = 20000) -> Read:
     except Exception as exc:  # noqa: BLE001
         return Read(frame=None, read_at=now, error=f"The table could not be read: {exc}")
 
-    frame = pd.DataFrame(rows, columns=[heading for _, heading in COLUMNS])
+    frame = pd.DataFrame(rows, columns=[column for column, _ in COLUMNS])
+    frame = frame.rename(columns={column: heading for column, heading in COLUMNS})
 
     return Read(frame=normalise(frame), read_at=now, missing_columns=missing)
 
