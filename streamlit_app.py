@@ -50,6 +50,15 @@ TOOLS = [
                  "Read-only, straight from BigQuery.",
     },
     {
+        "key": "ko_monitoring",
+        "page": "pages/5_KO_monitoring.py",
+        "label": "KO monitoring",
+        "icon": "🚨",
+        "blurb": "The shipments stuck at the warehouse without documents: whether the "
+                 "KO is fixed, when GXO last tried, and why it failed. Queues into "
+                 "`ko_monitoring/input/`; reads til.ko_operational_table.",
+    },
+    {
         "key": "warehouse_staging",
         "page": "pages/4_Warehouse_cancellations_staging.py",
         "label": "Warehouse cancellations (staging)",
