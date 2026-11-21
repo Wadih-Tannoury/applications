@@ -57,6 +57,7 @@ HEADLINE_COLUMNS = [
     "Shipment created (effective)", "Action", "Active task",
     "GXO KO reason",
     "ko_fixed", "ko_fix_date", "last_tried_by_gxo_date", "get_documents_error",
+    "tried_by_gxo_after_the_fix",
     "gxo_resolved",
 ]
 

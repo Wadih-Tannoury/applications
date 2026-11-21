@@ -57,6 +57,7 @@ COLUMNS: List[Tuple[str, str]] = [
     ("ko_fix_date", "ko_fix_date"),
     ("last_tried_by_gxo_date", "last_tried_by_gxo_date"),
     ("get_documents_error", "get_documents_error"),
+    ("tried_by_gxo_after_the_fix", "tried_by_gxo_after_the_fix"),
     ("gxo_resolved", "gxo_resolved"),
     ("gxo_resolved_date", "gxo_resolved_date"),
     # The evidence, hidden until it is asked for.
@@ -86,7 +87,7 @@ COLUMNS: List[Tuple[str, str]] = [
 ]
 
 BOOL_COLUMNS = {
-    "ko_fixed", "gxo_resolved", "eligibleForPackageClosure",
+    "ko_fixed", "gxo_resolved", "tried_by_gxo_after_the_fix", "eligibleForPackageClosure",
     "label_SHPLBL_populated", "label_RETLBL_present",
     "label_RETLBL_populated",
     "doc_INV_populated", "doc_RPI_populated",
