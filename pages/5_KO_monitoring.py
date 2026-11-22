@@ -22,10 +22,16 @@ batch — so this page commits through the git data API instead. See
 `shared/ko_monitoring.py`.
 
 **The table is the memory.** A shipment uploaded again is updated, never
-duplicated. A shipment an upload no longer carries is marked `ko_resolved`
-and drops off the working list without being deleted. `ko_fix_date`, once set,
-is never overwritten. The GXO resolved filter opens on *Open only*, which is
-the working list.
+duplicated. `ko_fix_date`, once set, is never overwritten. A shipment whose KO
+is resolved is moved to `til.ko_operational_history_table` and removed from the
+operational table, so what this page reads is the working list by construction.
+
+**Two views.** *GXO's list* — the shipments the warehouse has tried at least
+once, or that are in the latest workbook or the latest `monitoring.gxo_ko`
+import — is what the TLG login sees. *Everything* is every shipment still open
+with `ko_fixed = false`, and goes to administrators and to any login named in
+`[ko_monitoring] full_view_users`. Those users get a picker; a TLG login is
+not shown one.
 
 With no `[bigquery]` section in the secrets the page falls back to
 `ko_monitoring/output/latest.csv` in the repository — the last run only, no
@@ -43,12 +49,44 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from shared.console import GitHub, settings, start_page  # noqa: E402
+from shared.console import GitHub, is_admin, settings, start_page  # noqa: E402
 from shared import ko_monitoring as ko  # noqa: E402
 from shared import ko_table  # noqa: E402
 
 APP_KEY = "ko_monitoring"
 LABEL = "KO monitoring"
+
+# The dashboard's own columns, in the order they were asked for. Both views
+# show these; everything else in the table is behind "Show the evidence
+# columns".
+DASHBOARD_COLUMNS = [
+    "shipment_order_number",
+    "oerodp",
+    "ub_imko",
+    "brand",
+    "channel",
+    "order_submit_date",
+    "shipment_creation_date",
+    "fulfillment_status",
+    "source",
+    "gxo_result_code",
+    "ko_fixed",
+    "last_tried_by_gxo_date",
+    "ko_fix_date",
+    "tried_by_gxo_after_the_fix",
+    "action_needed_from_gxo",
+]
+
+# A shipment blocked behind another one that is holding its stock. Nothing can
+# be asked of the warehouse until that other shipment is dealt with, so these
+# are kept off both dashboards. The reason names the shipment, so it is
+# matched on its opening words rather than in full.
+STOCK_RESERVED = "Stock still reserved to the cancelled shipment"
+
+# Who sees the whole working list rather than GXO's. Anyone in
+# [ko_monitoring] full_view_users, plus administrators. Everyone else gets the
+# TLG view, which is the narrower of the two.
+DEFAULT_FULL_VIEW_USERS = ("wadih",)
 
 # The columns that were asked for, in the order they were asked for.
 HEADLINE_COLUMNS = [
@@ -71,7 +109,9 @@ HEADLINE_COLUMNS = [
 
 # The evidence behind each ko_fix_date, shown only when it is asked for.
 EVIDENCE_COLUMNS = [
-    "ko_resolved", "ko_resolved_date", "gxo_result_code", "source", "brand",
+    "ko_resolved", "ko_resolved_date", "in_latest_gxo_input",
+    "logistic_order_number", "oms_shipment_number", "action",
+    "location_provider", "ko_reason", "blocking_reason",
     "eligible_for_package_closure",
     "label_shplbl_populated", "label_shplbl_format",
     "label_retlbl_present", "label_retlbl_populated", "label_retlbl_format",
@@ -142,6 +182,96 @@ def load_dataset(repo: str, branch: str, path: str, use_table: bool) -> Dict[str
             "table_error": table_error}
 
 
+def wanted_columns(frame: pd.DataFrame) -> List[str]:
+    """The dashboard's columns that this frame actually has."""
+    return [column for column in DASHBOARD_COLUMNS if column in frame.columns]
+
+
+def truthy(frame: pd.DataFrame, column: str) -> pd.Series:
+    """A yes/true/1 column as a boolean, False where the column is absent."""
+    if column not in frame.columns:
+        return pd.Series(False, index=frame.index)
+    return frame[column].astype(str).str.strip().str.lower().isin(
+        ("yes", "true", "1"))
+
+
+def populated(frame: pd.DataFrame, column: str) -> pd.Series:
+    """Is this column filled in? False where the column is absent."""
+    if column not in frame.columns:
+        return pd.Series(False, index=frame.index)
+    return frame[column].astype(str).str.strip().ne("")
+
+
+def full_view_users() -> set:
+    """
+    Who may see the whole working list.
+
+    `[ko_monitoring] full_view_users` in the secrets, as a list or a
+    comma-separated string, on top of the default. Administrators always may,
+    so a new administrator needs no secrets change.
+    """
+    configured = st.secrets.get(APP_KEY, {}).get("full_view_users", [])
+    if isinstance(configured, str):
+        configured = [part.strip() for part in configured.split(",")]
+    return {str(name).strip().lower() for name in
+            list(DEFAULT_FULL_VIEW_USERS) + list(configured) if str(name).strip()}
+
+
+def choose_view(username: str) -> str:
+    """
+    `tlg` or `full`, and the picker when the user is allowed both.
+
+    A user who may only see one is not shown a choice — the picker would only
+    be a locked door with a label on it.
+    """
+    may_see_all = str(username).strip().lower() in full_view_users() or is_admin()
+    if not may_see_all:
+        return "tlg"
+    labels = {
+        "tlg": "GXO's list — tried at least once, or in the latest inputs",
+        "full": "Everything still open — every shipment with ko_fixed = false",
+    }
+    picked = st.radio(
+        "View", list(labels), format_func=labels.get, horizontal=True,
+        key="ko_view", index=1,
+        help="The GXO view is what a TLG login sees.",
+    )
+    return picked
+
+
+def column_filters(frame: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    """
+    A filter per column, laid out three to a row.
+
+    A column with few enough distinct values gets a multiselect, because
+    picking from a list beats typing; anything else gets a "contains" box.
+    Dates and timestamps get a box too — `2026-11` is a readable way to ask
+    for a month, and a date picker on a column that is often empty is worse
+    than useless.
+    """
+    shown = frame
+    present = [column for column in columns if column in frame.columns]
+    for index in range(0, len(present), 3):
+        cells = st.columns(3)
+        for cell, column in zip(cells, present[index:index + 3]):
+            values = options(frame, column)
+            with cell:
+                if 0 < len(values) <= 40:
+                    picked = st.multiselect(column, values, key=f"f_{column}")
+                    if picked:
+                        shown = shown[shown[column].isin(picked)]
+                else:
+                    needle = st.text_input(
+                        column, key=f"f_{column}",
+                        placeholder="contains…" if values else "nothing to filter",
+                        disabled=not values,
+                    )
+                    if needle.strip():
+                        shown = shown[shown[column].astype(str).str.contains(
+                            needle.strip(), case=False, na=False, regex=False)]
+    return shown
+
+
 def options(frame: pd.DataFrame, column: str) -> List[str]:
     if column not in frame.columns:
         return []
@@ -152,7 +282,7 @@ def options(frame: pd.DataFrame, column: str) -> List[str]:
 # Dashboard
 # ---------------------------------------------------------------------------
 
-def tab_dashboard(config) -> None:
+def tab_dashboard(config, username: str) -> None:
     left, right = st.columns([5, 1])
     left.markdown("#### The shipments")
     if right.button("Refresh", use_container_width=True):
@@ -167,26 +297,29 @@ def tab_dashboard(config) -> None:
     frame: pd.DataFrame = loaded["frame"]
     meta: Dict[str, Any] = loaded["meta"]
 
-    # The dashboard is the GXO working list: shipments still open, in a
-    # warehouse this console can do something about. A shipment is GXO's when
-    # it came from a GXO side of the upload or when the monitoring table says
-    # its location provider is GXO — the second is what the shipments taken
-    # from that table alone are recognised by, since their source is
-    # MONITORING rather than a side of an upload.
+    # Which of the two working lists this is. Both drop the resolved rows,
+    # which the workflow archives out of the table anyway — this is here for a
+    # row still waiting to be archived after a run that could not finish
+    # clearing them.
     everything = frame
-    gxo = pd.Series(False, index=frame.index)
-    if "source" in frame.columns:
-        gxo |= frame["source"].str.upper().str.contains("GXO", na=False)
-    if "location_provider" in frame.columns:
-        gxo |= frame["location_provider"].str.strip().str.upper().eq("GXO")
-    if "source" in frame.columns or "location_provider" in frame.columns:
-        frame = frame[gxo]
-    # Resolved shipments are archived out of the table by the workflow, so
-    # this normally takes nothing out; it is here for a row still waiting to
-    # be archived after a run that could not finish clearing them.
     if "ko_resolved" in frame.columns:
-        frame = frame[~frame["ko_resolved"].str.strip().str.lower().isin(
-            ("yes", "true", "1"))]
+        frame = frame[~truthy(frame, "ko_resolved")]
+    # Blocked behind another shipment: off both lists, whoever is looking.
+    if "blocking_reason" in frame.columns:
+        frame = frame[~frame["blocking_reason"].astype(str).str.strip()
+                      .str.startswith(STOCK_RESERVED)]
+
+    view = choose_view(username)
+    if view == "tlg":
+        # GXO's list: a shipment the warehouse has actually had its hands on,
+        # or one it is being asked about right now. A shipment that was never
+        # tried and is in neither of the latest inputs is not GXO's problem.
+        keep = populated(frame, "last_tried_by_gxo_date") | truthy(
+            frame, "in_latest_gxo_input")
+        frame = frame[keep]
+    else:
+        # The whole working list: everything the workflow is still re-trying.
+        frame = frame[~truthy(frame, "ko_fixed")]
     frame = frame.reset_index(drop=True)
 
     if loaded.get("origin") == "table":
@@ -211,83 +344,53 @@ def tab_dashboard(config) -> None:
                 note += " · dry run, nothing was called"
             st.caption(note + " · from the run CSV, not the table")
 
-    def flag(column: str) -> pd.Series:
-        if column not in frame:
-            return pd.Series(False, index=frame.index)
-        return frame[column].str.strip().ne("")
+    fixed = populated(frame, "ko_fix_date") | truthy(frame, "ko_fixed")
+    tried = populated(frame, "last_tried_by_gxo_date")
+    tried_since = truthy(frame, "tried_by_gxo_after_the_fix")
+    in_latest = truthy(frame, "in_latest_gxo_input")
 
-    # ko_fixed and ko_fix_date are written together and never disagree, but
-    # reading both means an older row that predates the column still counts.
-    fixed = flag("ko_fix_date") | (
-        frame["ko_fixed"].str.strip().str.lower().isin(("yes", "true", "1"))
-        if "ko_fixed" in frame else pd.Series(False, index=frame.index)
-    )
-    tried = flag("last_tried_by_gxo_date")
-    tried_since = (
-        frame["tried_by_gxo_after_the_fix"].str.strip().str.lower().isin(("yes", "true", "1"))
-        if "tried_by_gxo_after_the_fix" in frame else pd.Series(False, index=frame.index)
-    )
-    resolved = (
-        frame["ko_resolved"].str.strip().str.lower().isin(("yes", "true", "1"))
-        if "ko_resolved" in frame else pd.Series(False, index=frame.index)
-    )
-    open_rows = ~resolved
-
-    columns = st.columns(6)
-    columns[0].metric("Open", int(open_rows.sum()))
-    columns[1].metric("Fixed", int((fixed & open_rows).sum()))
-    columns[2].metric("Still KO", int(((~fixed) & open_rows).sum()))
-    columns[3].metric("Tried by GXO", int((tried & open_rows).sum()))
+    cells = st.columns(5)
+    cells[0].metric("Shipments", len(frame))
+    cells[1].metric("Fixed", int(fixed.sum()))
+    cells[2].metric("Still KO", int((~fixed).sum()))
+    cells[3].metric("Tried by GXO", int(tried.sum()))
     # Fixed on paper but untouched by the warehouse since is the group worth
     # chasing, so it gets a number of its own rather than a filter.
-    columns[4].metric("Fixed, not retried", int((fixed & open_rows & ~tried_since).sum()))
-    columns[5].metric("Hidden", len(everything) - len(frame),
-                      help="Rows in the table that this page does not show: "
-                           "resolved, or not GXO's.")
+    cells[4].metric("Fixed, not retried", int((fixed & ~tried_since).sum()))
+    if view == "full":
+        st.caption(
+            f"{int(in_latest.sum())} of these are in the latest workbook or "
+            f"gxo_ko import; {int(tried.sum())} have been tried at least once. "
+            "The GXO view is the union of those two."
+        )
 
-    with st.expander("Filters", expanded=True):
-        row = st.columns(5)
-        state = row[0].selectbox("KO state", ["Everything", "Still KO", "Fixed"])
-        actions = row[1].multiselect("Action", options(frame, "action"))
-        codes = row[2].multiselect("ub_imko", options(frame, "ub_imko"))
-        sources = row[3].multiselect("Source", options(frame, "source"))
-        providers = row[4].multiselect(
-            "Location provider", options(frame, "location_provider"))
+    with st.expander("Filters", expanded=False):
+        shown = column_filters(frame, wanted_columns(frame))
         row = st.columns([3, 1])
         needle = row[0].text_input(
-            "Search", placeholder="shipment, OERODP, logistic order, tracking number…"
+            "Search every column", key="f_search",
+            placeholder="shipment, OERODP, logistic order, tracking number…",
         )
         show_evidence = row[1].checkbox("Show the evidence columns", value=False)
+        if needle.strip():
+            text = needle.strip().upper()
+            shown = shown[shown.apply(
+                lambda record: any(text in str(value).upper()
+                                   for value in record.values), axis=1)]
 
-    shown = frame.copy()
-    if providers:
-        shown = shown[shown["location_provider"].isin(providers)]
-    if state == "Fixed":
-        shown = shown[fixed.reindex(shown.index, fill_value=False)]
-    elif state == "Still KO":
-        shown = shown[~fixed.reindex(shown.index, fill_value=False)]
-    if actions:
-        shown = shown[shown["action"].isin(actions)]
-    if codes:
-        shown = shown[shown["ub_imko"].isin(codes)]
-    if sources:
-        shown = shown[shown["source"].isin(sources)]
-    if needle.strip():
-        text = needle.strip().upper()
-        shown = shown[shown.apply(
-            lambda record: any(text in str(value).upper() for value in record.values), axis=1
-        )]
-
-    wanted = [column for column in HEADLINE_COLUMNS if column in shown.columns]
+    wanted = wanted_columns(shown)
     if show_evidence:
-        wanted += [column for column in EVIDENCE_COLUMNS if column in shown.columns]
+        wanted += [column for column in EVIDENCE_COLUMNS
+                   if column in shown.columns and column not in wanted]
 
-    st.caption(f"{len(shown)} of {len(frame)} shipment(s)")
+    st.caption(f"{len(shown)} of {len(frame)} shipment(s)"
+               + (f" · {len(everything) - len(frame)} row(s) outside this view"
+                  if len(everything) > len(frame) else ""))
     st.dataframe(shown[wanted], use_container_width=True, hide_index=True, height=520)
     st.download_button(
         "Download what is on screen",
         shown[wanted].to_csv(index=False).encode("utf-8"),
-        file_name=f"ko_monitoring-{ko.stamp()}.csv",
+        file_name=f"ko_monitoring-{view}-{ko.stamp()}.csv",
         mime="text/csv",
     )
 
@@ -456,7 +559,7 @@ def main() -> None:
 
     dashboard, new_run, runs_tab, log = st.tabs(["Dashboard", "New run", "Runs", "Log"])
     with dashboard:
-        tab_dashboard(config)
+        tab_dashboard(config, username)
     with new_run:
         tab_new_run(config, github, username)
     with runs_tab:

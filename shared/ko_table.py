@@ -11,7 +11,7 @@ It is the dashboard's first source, and `ko_monitoring/output/latest.csv` in
 the repository is the fallback for a deployment with no `[bigquery]` secrets.
 The difference between the two is memory: the CSV is the last run, the table is
 every run — including the shipments that have since dropped out of the uploads
-and been marked `gxo_resolved`.
+and been marked `ko_resolved`.
 
 The read is uncached here; the page wraps it in a short cache so moving a
 filter does not re-query.
@@ -42,60 +42,60 @@ BQ_SCOPES = ["https://www.googleapis.com/auth/bigquery"]
 # (BigQuery column, the heading the dashboard shows it under). The order is the
 # order of the table on the page, and the first block is what was asked for.
 COLUMNS: List[Tuple[str, str]] = [
-    ("shipment_order_number", "shipmentOrderNumber"),
-    ("oerodp", "OERODP"),
+    ("shipment_order_number", "shipment_order_number"),
+    ("oerodp", "oerodp"),
     ("ub_imko", "ub_imko"),
-    ("logistic_order", "Logistic order"),
-    ("oms_shipment_number", "OMS shipment #"),
-    ("order_date", "Order date"),
-    ("shipment_created", "Shipment created"),
-    ("shipment_created_effective", "Shipment created (effective)"),
-    ("action", "Action"),
-    ("active_task", "Active task"),
-    ("gxo_ko_reason", "GXO KO reason"),
+    ("logistic_order_number", "logistic_order_number"),
+    ("oms_shipment_number", "oms_shipment_number"),
+    ("order_submit_date", "order_submit_date"),
+    ("shipment_creation_date", "shipment_creation_date"),
+    ("action", "action"),
+    ("fulfillment_status", "fulfillment_status"),
+    ("location_provider", "location_provider"),
     ("ko_fixed", "ko_fixed"),
     ("ko_fix_date", "ko_fix_date"),
     ("last_tried_by_gxo_date", "last_tried_by_gxo_date"),
-    ("get_documents_error", "get_documents_error"),
+    ("gxo_result_code", "gxo_result_code"),
     ("tried_by_gxo_after_the_fix", "tried_by_gxo_after_the_fix"),
-    ("gxo_resolved", "gxo_resolved"),
-    ("gxo_resolved_date", "gxo_resolved_date"),
-    # The evidence, hidden until it is asked for.
-    ("ko_status", "ko_status"),
+    ("ko_reason", "ko_reason"),
+    ("ko_resolved", "ko_resolved"),
+    ("ko_resolved_date", "ko_resolved_date"),
     ("source", "source"),
     ("brand", "brand"),
-    ("eligible_for_package_closure", "eligibleForPackageClosure"),
-    ("label_shplbl_populated", "label_SHPLBL_populated"),
-    ("label_shplbl_format", "label_SHPLBL_format"),
-    ("label_retlbl_present", "label_RETLBL_present"),
-    ("label_retlbl_populated", "label_RETLBL_populated"),
-    ("label_retlbl_format", "label_RETLBL_format"),
+    ("channel", "channel"),
+    ("ko_source", "ko_source"),
+    ("blocking_reason", "blocking_reason"),
+    ("action_needed_from_gxo", "action_needed_from_gxo"),
+    ("in_latest_gxo_input", "in_latest_gxo_input"),
+    ("eligible_for_package_closure", "eligible_for_package_closure"),
+    ("label_shplbl_populated", "label_shplbl_populated"),
+    ("label_shplbl_format", "label_shplbl_format"),
+    ("label_retlbl_present", "label_retlbl_present"),
+    ("label_retlbl_populated", "label_retlbl_populated"),
+    ("label_retlbl_format", "label_retlbl_format"),
     ("shipping_tracking_number", "shipping_tracking_number"),
     ("return_tracking_number", "return_tracking_number"),
-    ("doc_inv_populated", "doc_INV_populated"),
-    ("doc_rpi_populated", "doc_RPI_populated"),
-    ("api_http_status", "api_http_status"),
-    ("api_message", "api_message"),
-    ("api_create_error", "api_create_error"),
-    ("api_called_at", "api_called_at"),
-    ("gxo_result_code", "gxo_result_code"),
+    ("doc_inv_populated", "doc_inv_populated"),
+    ("doc_rpi_populated", "doc_rpi_populated"),
+    ("api_call_date", "api_call_date"),
     ("batch", "batch"),
-    ("times_seen", "times_seen"),
+    # Bookkeeping, shown last.
     ("last_run", "last_run"),
-    ("row_insertion_date", "First seen"),
-    ("row_last_modified_date", "Last updated"),
+    ("row_insertion_date", "first_seen"),
+    ("row_last_modified_date", "last_updated"),
 ]
 
 BOOL_COLUMNS = {
-    "ko_fixed", "gxo_resolved", "tried_by_gxo_after_the_fix", "eligibleForPackageClosure",
-    "label_SHPLBL_populated", "label_RETLBL_present",
-    "label_RETLBL_populated",
-    "doc_INV_populated", "doc_RPI_populated",
+    "ko_fixed", "ko_resolved", "tried_by_gxo_after_the_fix",
+    "in_latest_gxo_input",
+    "eligible_for_package_closure",
+    "label_shplbl_populated", "label_retlbl_present", "label_retlbl_populated",
+    "doc_inv_populated", "doc_rpi_populated",
 }
 
 TIMESTAMP_COLUMNS = {
-    "ko_fix_date", "last_tried_by_gxo_date", "gxo_resolved_date",
-    "api_called_at", "First seen", "Last updated",
+    "ko_fix_date", "last_tried_by_gxo_date", "ko_resolved_date",
+    "api_call_date", "first_seen", "last_updated",
 }
 
 
