@@ -22,7 +22,7 @@ batch — so this page commits through the git data API instead. See
 `shared/ko_monitoring.py`.
 
 **The table is the memory.** A shipment uploaded again is updated, never
-duplicated. A shipment an upload no longer carries is marked `gxo_resolved`
+duplicated. A shipment an upload no longer carries is marked `ko_resolved`
 and drops off the working list without being deleted. `ko_fix_date`, once set,
 is never overwritten. The GXO resolved filter opens on *Open only*, which is
 the working list.
@@ -52,26 +52,32 @@ LABEL = "KO monitoring"
 
 # The columns that were asked for, in the order they were asked for.
 HEADLINE_COLUMNS = [
-    "shipmentOrderNumber", "OERODP", "ub_imko", "Logistic order",
-    "OMS shipment #", "Order date", "Shipment created",
-    "Shipment created (effective)", "Action", "Active task",
-    "GXO KO reason",
-    "ko_fixed", "ko_fix_date", "last_tried_by_gxo_date", "get_documents_error",
+    "shipment_order_number",
+    "oerodp",
+    "ub_imko",
+    "logistic_order_number",
+    "oms_shipment_number",
+    "order_submit_date",
+    "shipment_creation_date",
+    "action",
+    "fulfillment_status",
+    "location_provider",
+    "ko_fixed",
+    "ko_fix_date",
+    "last_tried_by_gxo_date",
     "tried_by_gxo_after_the_fix",
-    "gxo_resolved",
+    "ko_reason",
 ]
 
 # The evidence behind each ko_fix_date, shown only when it is asked for.
 EVIDENCE_COLUMNS = [
-    "gxo_resolved_date", "ko_status", "source", "brand",
-    "eligibleForPackageClosure",
-    "label_SHPLBL_populated", "label_SHPLBL_format", "label_RETLBL_present",
-    "label_RETLBL_populated", "label_RETLBL_format",
+    "ko_resolved", "ko_resolved_date", "gxo_result_code", "source", "brand",
+    "eligible_for_package_closure",
+    "label_shplbl_populated", "label_shplbl_format",
+    "label_retlbl_present", "label_retlbl_populated", "label_retlbl_format",
     "shipping_tracking_number", "return_tracking_number",
-    "doc_INV_populated", "doc_RPI_populated",
-    "api_http_status", "api_message", "api_create_error", "api_called_at",
-    "gxo_result_code", "batch", "times_seen", "last_run",
-    "First seen", "Last updated",
+    "doc_inv_populated", "doc_rpi_populated",
+    "api_call_date", "batch", "last_run", "first_seen", "last_updated",
 ]
 
 RUN_ICONS = {
@@ -121,7 +127,7 @@ def load_dataset(repo: str, branch: str, path: str, use_table: bool) -> Dict[str
     # The CSV is one run, so it knows nothing about resolved shipments: the
     # columns are added empty rather than left out, so the page is the same
     # page whichever source it drew from.
-    for column in ("gxo_resolved", "gxo_resolved_date"):
+    for column in ("ko_resolved", "ko_resolved_date"):
         if column not in frame.columns:
             frame[column] = ""
 
@@ -161,6 +167,28 @@ def tab_dashboard(config) -> None:
     frame: pd.DataFrame = loaded["frame"]
     meta: Dict[str, Any] = loaded["meta"]
 
+    # The dashboard is the GXO working list: shipments still open, in a
+    # warehouse this console can do something about. A shipment is GXO's when
+    # it came from a GXO side of the upload or when the monitoring table says
+    # its location provider is GXO — the second is what the shipments taken
+    # from that table alone are recognised by, since their source is
+    # MONITORING rather than a side of an upload.
+    everything = frame
+    gxo = pd.Series(False, index=frame.index)
+    if "source" in frame.columns:
+        gxo |= frame["source"].str.upper().str.contains("GXO", na=False)
+    if "location_provider" in frame.columns:
+        gxo |= frame["location_provider"].str.strip().str.upper().eq("GXO")
+    if "source" in frame.columns or "location_provider" in frame.columns:
+        frame = frame[gxo]
+    # Resolved shipments are archived out of the table by the workflow, so
+    # this normally takes nothing out; it is here for a row still waiting to
+    # be archived after a run that could not finish clearing them.
+    if "ko_resolved" in frame.columns:
+        frame = frame[~frame["ko_resolved"].str.strip().str.lower().isin(
+            ("yes", "true", "1"))]
+    frame = frame.reset_index(drop=True)
+
     if loaded.get("origin") == "table":
         st.caption(
             f"{ko_table.FQN} · {len(frame)} shipment(s) ever seen · read "
@@ -195,10 +223,13 @@ def tab_dashboard(config) -> None:
         if "ko_fixed" in frame else pd.Series(False, index=frame.index)
     )
     tried = flag("last_tried_by_gxo_date")
-    errored = flag("get_documents_error")
+    tried_since = (
+        frame["tried_by_gxo_after_the_fix"].str.strip().str.lower().isin(("yes", "true", "1"))
+        if "tried_by_gxo_after_the_fix" in frame else pd.Series(False, index=frame.index)
+    )
     resolved = (
-        frame["gxo_resolved"].str.strip().str.lower().isin(("yes", "true", "1"))
-        if "gxo_resolved" in frame else pd.Series(False, index=frame.index)
+        frame["ko_resolved"].str.strip().str.lower().isin(("yes", "true", "1"))
+        if "ko_resolved" in frame else pd.Series(False, index=frame.index)
     )
     open_rows = ~resolved
 
@@ -207,20 +238,21 @@ def tab_dashboard(config) -> None:
     columns[1].metric("Fixed", int((fixed & open_rows).sum()))
     columns[2].metric("Still KO", int(((~fixed) & open_rows).sum()))
     columns[3].metric("Tried by GXO", int((tried & open_rows).sum()))
-    columns[4].metric("With an error", int((errored & open_rows).sum()))
-    columns[5].metric("GXO resolved", int(resolved.sum()))
+    # Fixed on paper but untouched by the warehouse since is the group worth
+    # chasing, so it gets a number of its own rather than a filter.
+    columns[4].metric("Fixed, not retried", int((fixed & open_rows & ~tried_since).sum()))
+    columns[5].metric("Hidden", len(everything) - len(frame),
+                      help="Rows in the table that this page does not show: "
+                           "resolved, or not GXO's.")
 
     with st.expander("Filters", expanded=True):
         row = st.columns(5)
-        shown_state = row[0].selectbox(
-            "GXO resolved", ["Open only", "Everything", "Resolved only"],
-            help="A shipment is resolved once an upload no longer carries it. "
-                 "Open is the working list.",
-        )
-        state = row[1].selectbox("KO state", ["Everything", "Still KO", "Fixed"])
-        actions = row[2].multiselect("Action", options(frame, "Action"))
-        codes = row[3].multiselect("ub_imko", options(frame, "ub_imko"))
-        sources = row[4].multiselect("Source", options(frame, "source"))
+        state = row[0].selectbox("KO state", ["Everything", "Still KO", "Fixed"])
+        actions = row[1].multiselect("Action", options(frame, "action"))
+        codes = row[2].multiselect("ub_imko", options(frame, "ub_imko"))
+        sources = row[3].multiselect("Source", options(frame, "source"))
+        providers = row[4].multiselect(
+            "Location provider", options(frame, "location_provider"))
         row = st.columns([3, 1])
         needle = row[0].text_input(
             "Search", placeholder="shipment, OERODP, logistic order, tracking number…"
@@ -228,16 +260,14 @@ def tab_dashboard(config) -> None:
         show_evidence = row[1].checkbox("Show the evidence columns", value=False)
 
     shown = frame.copy()
-    if shown_state == "Open only":
-        shown = shown[open_rows]
-    elif shown_state == "Resolved only":
-        shown = shown[resolved]
+    if providers:
+        shown = shown[shown["location_provider"].isin(providers)]
     if state == "Fixed":
         shown = shown[fixed.reindex(shown.index, fill_value=False)]
     elif state == "Still KO":
         shown = shown[~fixed.reindex(shown.index, fill_value=False)]
     if actions:
-        shown = shown[shown["Action"].isin(actions)]
+        shown = shown[shown["action"].isin(actions)]
     if codes:
         shown = shown[shown["ub_imko"].isin(codes)]
     if sources:
@@ -266,10 +296,10 @@ def tab_dashboard(config) -> None:
         still = shown[~fixed.reindex(shown.index, fill_value=False)]
         with left:
             st.markdown("###### Still KO, by action")
-            breakdown(still, "Action", "Action")
+            breakdown(still, "action", "Action")
         with right:
             st.markdown("###### Why a shipment is still KO")
-            breakdown(still, "ko_status", "Reason")
+            breakdown(still, "ko_reason", "Reason")
 
 
 def breakdown(frame: pd.DataFrame, column: str, heading: str, limit: int = 12) -> None:
