@@ -38,6 +38,7 @@ resolved shipments, no history — and says so under the heading.
 """
 from __future__ import annotations
 
+import io
 import json
 import sys
 from pathlib import Path
@@ -198,6 +199,44 @@ def wanted_columns(frame: pd.DataFrame, view: str = "tlg") -> List[str]:
     """The view's columns that this frame actually has, in order."""
     columns = TROUBLESHOOTING_COLUMNS if view == "debug" else DASHBOARD_COLUMNS
     return [column for column in columns if column in frame.columns]
+
+
+XLSX_MIME = ("application/vnd.openxmlformats-officedocument"
+             ".spreadsheetml.sheet")
+
+
+def excel_bytes(frame: pd.DataFrame, sheet: str = "KO monitoring") -> bytes:
+    """
+    What is on screen, as a .xlsx — or b"" when openpyxl is not installed.
+
+    Returning empty rather than raising is deliberate: the writer is the one
+    dependency this page has that Streamlit does not pull in by itself, so on
+    the first deploy after this change the app may be running an environment
+    that predates requirements.txt. A page that falls back to CSV is better
+    than a page that throws when someone clicks download.
+
+    The header row is frozen and filterable and the columns are widened to
+    their contents, because this file is opened to be read and sorted, not
+    parsed.
+    """
+    buffer = io.BytesIO()
+    try:
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            frame.to_excel(writer, index=False, sheet_name=sheet[:31])
+            worksheet = writer.sheets[sheet[:31]]
+            worksheet.freeze_panes = "A2"
+            worksheet.auto_filter.ref = worksheet.dimensions
+            for position, column in enumerate(frame.columns, start=1):
+                longest = max(
+                    [len(str(column))]
+                    + [len(str(value)) for value in frame[column].head(500)]
+                ) + 2
+                worksheet.column_dimensions[
+                    worksheet.cell(row=1, column=position).column_letter
+                ].width = min(longest, 60)
+    except Exception:  # noqa: BLE001 - the CSV fallback is the answer
+        return b""
+    return buffer.getvalue()
 
 
 def truthy(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -416,12 +455,24 @@ def tab_dashboard(config, username: str) -> None:
                + (f" · {len(everything) - len(frame)} row(s) outside this view"
                   if len(everything) > len(frame) else ""))
     st.dataframe(shown[wanted], use_container_width=True, hide_index=True, height=520)
-    st.download_button(
-        "Download what is on screen",
-        shown[wanted].to_csv(index=False).encode("utf-8"),
-        file_name=f"ko_monitoring-{view}-{ko.stamp()}.csv",
-        mime="text/csv",
-    )
+    workbook = excel_bytes(shown[wanted])
+    if workbook:
+        st.download_button(
+            "Download what is on screen",
+            workbook,
+            file_name=f"ko_monitoring-{view}-{ko.stamp()}.xlsx",
+            mime=XLSX_MIME,
+        )
+    else:
+        st.download_button(
+            "Download what is on screen",
+            shown[wanted].to_csv(index=False).encode("utf-8"),
+            file_name=f"ko_monitoring-{view}-{ko.stamp()}.csv",
+            mime="text/csv",
+        )
+        st.caption("Excel needs `openpyxl`, which this deployment does not "
+                   "have yet — redeploy with the newest `requirements.txt` "
+                   "and the download becomes a .xlsx.")
 
     if len(shown):
         left, right = st.columns(2)
