@@ -76,6 +76,19 @@ DASHBOARD_COLUMNS = [
     "action_needed_from_gxo",
 ]
 
+# The troubleshooting view's columns: the dashboard's, plus the four that say
+# why a shipment is where it is. action and ko_reason are this workflow's own
+# account of the last thing it did; blocking_reason is the monitoring table's;
+# ko_source says which of them put the shipment in the table in the first
+# place. They are the columns you want when a row looks wrong, and noise on a
+# list meant for the warehouse — hence a view of its own.
+TROUBLESHOOTING_COLUMNS = DASHBOARD_COLUMNS + [
+    "action",
+    "ko_reason",
+    "blocking_reason",
+    "ko_source",
+]
+
 # A shipment blocked behind another one that is holding its stock. Nothing can
 # be asked of the warehouse until that other shipment is dealt with, so these
 # are kept off both dashboards. The reason names the shipment, so it is
@@ -181,9 +194,10 @@ def load_dataset(repo: str, branch: str, path: str, use_table: bool) -> Dict[str
             "table_error": table_error}
 
 
-def wanted_columns(frame: pd.DataFrame) -> List[str]:
-    """The dashboard's columns that this frame actually has."""
-    return [column for column in DASHBOARD_COLUMNS if column in frame.columns]
+def wanted_columns(frame: pd.DataFrame, view: str = "tlg") -> List[str]:
+    """The view's columns that this frame actually has, in order."""
+    columns = TROUBLESHOOTING_COLUMNS if view == "debug" else DASHBOARD_COLUMNS
+    return [column for column in columns if column in frame.columns]
 
 
 def truthy(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -229,6 +243,7 @@ def choose_view(username: str) -> str:
     labels = {
         "tlg": "GXO's list — every shipment still open at GXO",
         "full": "Everything still open — every shipment with ko_fixed = false",
+        "debug": "Troubleshooting — every row in the table, nothing hidden",
     }
     picked = st.radio(
         "View", list(labels), format_func=labels.get, horizontal=True,
@@ -296,19 +311,23 @@ def tab_dashboard(config, username: str) -> None:
     frame: pd.DataFrame = loaded["frame"]
     meta: Dict[str, Any] = loaded["meta"]
 
-    # Which of the two working lists this is. Both drop the resolved rows,
-    # which the workflow archives out of the table anyway — this is here for a
-    # row still waiting to be archived after a run that could not finish
-    # clearing them.
     everything = frame
-    if "ko_resolved" in frame.columns:
-        frame = frame[~truthy(frame, "ko_resolved")]
-    # Blocked behind another shipment: off both lists, whoever is looking.
-    if "blocking_reason" in frame.columns:
-        frame = frame[~frame["blocking_reason"].astype(str).str.strip()
-                      .str.startswith(STOCK_RESERVED)]
-
     view = choose_view(username)
+
+    # Troubleshooting shows the table as it is. Every other view is a working
+    # list, and a working list drops the rows nobody can act on: the resolved
+    # ones, which the workflow archives out of the table anyway and which are
+    # only still here after a run that could not finish clearing them, and the
+    # ones blocked behind another shipment's stock. Those two cuts are exactly
+    # what makes a row "missing" from a dashboard, so the view that exists to
+    # explain a row must not make them.
+    if view != "debug":
+        if "ko_resolved" in frame.columns:
+            frame = frame[~truthy(frame, "ko_resolved")]
+        if "blocking_reason" in frame.columns:
+            frame = frame[~frame["blocking_reason"].astype(str).str.strip()
+                          .str.startswith(STOCK_RESERVED)]
+
     if view == "tlg":
         # GXO's list, and only GXO's: every shipment at that warehouse, tried
         # or not. A shipment nobody has asked GXO about yet is still GXO's to
@@ -319,10 +338,12 @@ def tab_dashboard(config, username: str) -> None:
         if "source" in frame.columns:
             gxo |= frame["source"].str.upper().str.contains("GXO", na=False)
         frame = frame[gxo]
-    else:
+    elif view == "full":
         # The whole working list: everything the workflow is still re-trying,
         # at every warehouse.
         frame = frame[~truthy(frame, "ko_fixed")]
+    # "debug" filters nothing: it is the table, and the filter grid below is
+    # how you narrow it.
     frame = frame.reset_index(drop=True)
 
     if loaded.get("origin") == "table":
@@ -331,7 +352,8 @@ def tab_dashboard(config, username: str) -> None:
         # view that hides rows look like a table that has not got them.
         st.caption(
             f"{ko_table.FQN} · {len(everything)} row(s) in the table · "
-            + ("GXO's list" if view == "tlg" else "everything still open")
+            + {"tlg": "GXO's list", "full": "everything still open",
+               "debug": "troubleshooting, nothing hidden"}.get(view, view)
             + f" · read {ko.show_time(loaded['read_at'].isoformat())} UTC"
         )
         if loaded.get("missing_columns"):
@@ -372,7 +394,7 @@ def tab_dashboard(config, username: str) -> None:
         )
 
     with st.expander("Filters", expanded=False):
-        shown = column_filters(frame, wanted_columns(frame))
+        shown = column_filters(frame, wanted_columns(frame, view))
         row = st.columns([3, 1])
         needle = row[0].text_input(
             "Search every column", key="f_search",
@@ -385,7 +407,7 @@ def tab_dashboard(config, username: str) -> None:
                 lambda record: any(text in str(value).upper()
                                    for value in record.values), axis=1)]
 
-    wanted = wanted_columns(shown)
+    wanted = wanted_columns(shown, view)
     if show_evidence:
         wanted += [column for column in EVIDENCE_COLUMNS
                    if column in shown.columns and column not in wanted]
