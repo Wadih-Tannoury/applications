@@ -42,7 +42,7 @@ import io
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -205,38 +205,53 @@ XLSX_MIME = ("application/vnd.openxmlformats-officedocument"
              ".spreadsheetml.sheet")
 
 
-def excel_bytes(frame: pd.DataFrame, sheet: str = "KO monitoring") -> bytes:
+def excel_bytes(frame: pd.DataFrame,
+                sheet: str = "KO monitoring") -> Tuple[bytes, str]:
     """
-    What is on screen, as a .xlsx — or b"" when openpyxl is not installed.
+    What is on screen, as a .xlsx, and why not when it could not be built.
 
-    Returning empty rather than raising is deliberate: the writer is the one
-    dependency this page has that Streamlit does not pull in by itself, so on
-    the first deploy after this change the app may be running an environment
-    that predates requirements.txt. A page that falls back to CSV is better
-    than a page that throws when someone clicks download.
+    Returns (bytes, reason). An empty reason means the workbook is good.
+
+    pandas writes .xlsx through a third-party engine and installs none of
+    them, so the usual cause of a CSV where a workbook was expected is a
+    deployment that has not picked up requirements.txt yet. Both engines are
+    tried, and the reason is handed back rather than swallowed: a download
+    button that quietly changes format is a bug report that takes an hour,
+    and the reason turns it into one line on screen.
 
     The header row is frozen and filterable and the columns are widened to
-    their contents, because this file is opened to be read and sorted, not
-    parsed.
+    their contents, because this file is opened to be read and sorted.
     """
-    buffer = io.BytesIO()
-    try:
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            frame.to_excel(writer, index=False, sheet_name=sheet[:31])
-            worksheet = writer.sheets[sheet[:31]]
-            worksheet.freeze_panes = "A2"
-            worksheet.auto_filter.ref = worksheet.dimensions
-            for position, column in enumerate(frame.columns, start=1):
-                longest = max(
-                    [len(str(column))]
-                    + [len(str(value)) for value in frame[column].head(500)]
-                ) + 2
-                worksheet.column_dimensions[
-                    worksheet.cell(row=1, column=position).column_letter
-                ].width = min(longest, 60)
-    except Exception:  # noqa: BLE001 - the CSV fallback is the answer
-        return b""
-    return buffer.getvalue()
+    reasons = []
+    for engine in ("openpyxl", "xlsxwriter"):
+        buffer = io.BytesIO()
+        try:
+            with pd.ExcelWriter(buffer, engine=engine) as writer:
+                frame.to_excel(writer, index=False, sheet_name=sheet[:31])
+                worksheet = writer.sheets[sheet[:31]]
+                widths = [
+                    min(max([len(str(column))]
+                            + [len(str(value)) for value in frame[column].head(500)]) + 2,
+                        60)
+                    for column in frame.columns
+                ]
+                if engine == "openpyxl":
+                    worksheet.freeze_panes = "A2"
+                    worksheet.auto_filter.ref = worksheet.dimensions
+                    for position, width in enumerate(widths, start=1):
+                        worksheet.column_dimensions[
+                            worksheet.cell(row=1, column=position).column_letter
+                        ].width = width
+                else:
+                    worksheet.freeze_panes(1, 0)
+                    if len(frame):
+                        worksheet.autofilter(0, 0, len(frame), len(frame.columns) - 1)
+                    for position, width in enumerate(widths):
+                        worksheet.set_column(position, position, width)
+            return buffer.getvalue(), ""
+        except Exception as exc:  # noqa: BLE001 - try the next engine, then report
+            reasons.append(f"{engine}: {type(exc).__name__}: {exc}")
+    return b"", "; ".join(reasons)
 
 
 def truthy(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -455,7 +470,7 @@ def tab_dashboard(config, username: str) -> None:
                + (f" · {len(everything) - len(frame)} row(s) outside this view"
                   if len(everything) > len(frame) else ""))
     st.dataframe(shown[wanted], use_container_width=True, hide_index=True, height=520)
-    workbook = excel_bytes(shown[wanted])
+    workbook, why_not_excel = excel_bytes(shown[wanted])
     if workbook:
         st.download_button(
             "Download what is on screen",
@@ -470,9 +485,10 @@ def tab_dashboard(config, username: str) -> None:
             file_name=f"ko_monitoring-{view}-{ko.stamp()}.csv",
             mime="text/csv",
         )
-        st.caption("Excel needs `openpyxl`, which this deployment does not "
-                   "have yet — redeploy with the newest `requirements.txt` "
-                   "and the download becomes a .xlsx.")
+        st.caption("This is a CSV because the workbook could not be built: "
+                   + why_not_excel
+                   + " — `openpyxl` is in requirements.txt; if it is named "
+                     "there, the deployment has not reinstalled yet.")
 
     if len(shown):
         left, right = st.columns(2)
