@@ -26,12 +26,11 @@ duplicated. `ko_fix_date`, once set, is never overwritten. A shipment whose KO
 is resolved is moved to `til.ko_operational_history_table` and removed from the
 operational table, so what this page reads is the working list by construction.
 
-**Two views.** *GXO's list* — the shipments the warehouse has tried at least
-once, or that are in the latest workbook or the latest `monitoring.gxo_ko`
-import — is what the TLG login sees. *Everything* is every shipment still open
-with `ko_fixed = false`, and goes to administrators and to any login named in
-`[ko_monitoring] full_view_users`. Those users get a picker; a TLG login is
-not shown one.
+**Two views.** *GXO's list* — every shipment still open at GXO, whether the
+warehouse has tried it or not — is what the TLG login sees. *Everything* is
+every shipment still open with `ko_fixed = false`, at every warehouse, and goes
+to administrators and to any login named in `[ko_monitoring] full_view_users`.
+Those users get a picker; a TLG login is not shown one.
 
 With no `[bigquery]` section in the secrets the page falls back to
 `ko_monitoring/output/latest.csv` in the repository — the last run only, no
@@ -228,7 +227,7 @@ def choose_view(username: str) -> str:
     if not may_see_all:
         return "tlg"
     labels = {
-        "tlg": "GXO's list — tried at least once, or in the latest inputs",
+        "tlg": "GXO's list — every shipment still open at GXO",
         "full": "Everything still open — every shipment with ko_fixed = false",
     }
     picked = st.radio(
@@ -311,18 +310,15 @@ def tab_dashboard(config, username: str) -> None:
 
     view = choose_view(username)
     if view == "tlg":
-        # GXO's list, and only GXO's: a shipment the warehouse has actually
-        # had its hands on, or one it is being asked about right now. A
-        # shipment that was never tried and is in neither of the latest inputs
-        # is not GXO's problem, and neither is one at another warehouse.
+        # GXO's list, and only GXO's: every shipment at that warehouse, tried
+        # or not. A shipment nobody has asked GXO about yet is still GXO's to
+        # handle, so the only thing this view takes out is another warehouse.
         gxo = pd.Series(False, index=frame.index)
         if "location_provider" in frame.columns:
             gxo |= frame["location_provider"].str.strip().str.upper().eq("GXO")
         if "source" in frame.columns:
             gxo |= frame["source"].str.upper().str.contains("GXO", na=False)
-        keep = gxo & (populated(frame, "last_tried_by_gxo_date")
-                      | truthy(frame, "in_latest_gxo_input"))
-        frame = frame[keep]
+        frame = frame[gxo]
     else:
         # The whole working list: everything the workflow is still re-trying,
         # at every warehouse.
