@@ -311,21 +311,32 @@ def tab_dashboard(config, username: str) -> None:
 
     view = choose_view(username)
     if view == "tlg":
-        # GXO's list: a shipment the warehouse has actually had its hands on,
-        # or one it is being asked about right now. A shipment that was never
-        # tried and is in neither of the latest inputs is not GXO's problem.
-        keep = populated(frame, "last_tried_by_gxo_date") | truthy(
-            frame, "in_latest_gxo_input")
+        # GXO's list, and only GXO's: a shipment the warehouse has actually
+        # had its hands on, or one it is being asked about right now. A
+        # shipment that was never tried and is in neither of the latest inputs
+        # is not GXO's problem, and neither is one at another warehouse.
+        gxo = pd.Series(False, index=frame.index)
+        if "location_provider" in frame.columns:
+            gxo |= frame["location_provider"].str.strip().str.upper().eq("GXO")
+        if "source" in frame.columns:
+            gxo |= frame["source"].str.upper().str.contains("GXO", na=False)
+        keep = gxo & (populated(frame, "last_tried_by_gxo_date")
+                      | truthy(frame, "in_latest_gxo_input"))
         frame = frame[keep]
     else:
-        # The whole working list: everything the workflow is still re-trying.
+        # The whole working list: everything the workflow is still re-trying,
+        # at every warehouse.
         frame = frame[~truthy(frame, "ko_fixed")]
     frame = frame.reset_index(drop=True)
 
     if loaded.get("origin") == "table":
+        # The table's own size, not the filtered count: "ever seen" meant the
+        # number left after the view had already taken its cut, which made a
+        # view that hides rows look like a table that has not got them.
         st.caption(
-            f"{ko_table.FQN} · {len(frame)} shipment(s) ever seen · read "
-            f"{ko.show_time(loaded['read_at'].isoformat())} UTC"
+            f"{ko_table.FQN} · {len(everything)} row(s) in the table · "
+            + ("GXO's list" if view == "tlg" else "everything still open")
+            + f" · read {ko.show_time(loaded['read_at'].isoformat())} UTC"
         )
         if loaded.get("missing_columns"):
             st.caption(
