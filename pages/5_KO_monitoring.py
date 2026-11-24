@@ -27,10 +27,14 @@ is resolved is moved to `til.ko_operational_history_table` and removed from the
 operational table, so what this page reads is the working list by construction.
 
 **Two views.** *GXO's list* — every shipment still open at GXO, whether the
-warehouse has tried it or not — is what the TLG login sees. *Everything* is
-every shipment still open with `ko_fixed = false`, at every warehouse, and goes
-to administrators and to any login named in `[ko_monitoring] full_view_users`.
+warehouse has tried it or not — is what every login sees. *Troubleshooting* is
+the table as it stands, nothing filtered and four more columns, and goes to
+administrators and to any login named in `[ko_monitoring] full_view_users`.
 Those users get a picker; a TLG login is not shown one.
+
+The metrics count by `action_needed_from_gxo`, not by `ko_fixed`: what matters
+is what somebody still has to go and do, and a shipment can be fixed and still
+need its documents printed.
 
 With no `[bigquery]` section in the secrets the page falls back to
 `ko_monitoring/output/latest.csv` in the repository — the last run only, no
@@ -89,6 +93,14 @@ TROUBLESHOOTING_COLUMNS = DASHBOARD_COLUMNS + [
     "blocking_reason",
     "ko_source",
 ]
+
+# What the warehouse has been asked to do, exactly as the workflow writes it
+# into action_needed_from_gxo. The metrics row counts by these rather than by
+# ko_fixed: "fixed" is this workflow's verdict on the documents call, while the
+# action is what somebody still has to go and do, and those are not the same
+# question. A shipment can be fixed and still need its documents printed.
+ACTION_PRINT = "To print shipping documents"
+ACTION_CANCEL = "To cancel the shipment"
 
 # A shipment blocked behind another one that is holding its stock. Nothing can
 # be asked of the warehouse until that other shipment is dealt with, so these
@@ -283,22 +295,23 @@ def full_view_users() -> set:
 
 def choose_view(username: str) -> str:
     """
-    `tlg` or `full`, and the picker when the user is allowed both.
+    `tlg` or `debug`, and the picker when the user is allowed both.
 
     A user who may only see one is not shown a choice — the picker would only
-    be a locked door with a label on it.
+    be a locked door with a label on it. The default is GXO's list: it is the
+    list the work is done from, and troubleshooting is for when a row on it
+    looks wrong.
     """
     may_see_all = str(username).strip().lower() in full_view_users() or is_admin()
     if not may_see_all:
         return "tlg"
     labels = {
         "tlg": "GXO's list — every shipment still open at GXO",
-        "full": "Everything still open — every shipment with ko_fixed = false",
         "debug": "Troubleshooting — every row in the table, nothing hidden",
     }
     picked = st.radio(
         "View", list(labels), format_func=labels.get, horizontal=True,
-        key="ko_view", index=1,
+        key="ko_view", index=0,
         help="The GXO view is what a TLG login sees.",
     )
     return picked
@@ -389,10 +402,6 @@ def tab_dashboard(config, username: str) -> None:
         if "source" in frame.columns:
             gxo |= frame["source"].str.upper().str.contains("GXO", na=False)
         frame = frame[gxo]
-    elif view == "full":
-        # The whole working list: everything the workflow is still re-trying,
-        # at every warehouse.
-        frame = frame[~truthy(frame, "ko_fixed")]
     # "debug" filters nothing: it is the table, and the filter grid below is
     # how you narrow it.
     frame = frame.reset_index(drop=True)
@@ -403,7 +412,7 @@ def tab_dashboard(config, username: str) -> None:
         # view that hides rows look like a table that has not got them.
         st.caption(
             f"{ko_table.FQN} · {len(everything)} row(s) in the table · "
-            + {"tlg": "GXO's list", "full": "everything still open",
+            + {"tlg": "GXO's list",
                "debug": "troubleshooting, nothing hidden"}.get(view, view)
             + f" · read {ko.show_time(loaded['read_at'].isoformat())} UTC"
         )
@@ -425,24 +434,23 @@ def tab_dashboard(config, username: str) -> None:
             st.caption(note + " · from the run CSV, not the table")
 
     fixed = populated(frame, "ko_fix_date") | truthy(frame, "ko_fixed")
-    tried = populated(frame, "last_tried_by_gxo_date")
-    tried_since = truthy(frame, "tried_by_gxo_after_the_fix")
-    in_latest = truthy(frame, "in_latest_gxo_input")
+
+    # The three groups the work actually divides into, read off the action
+    # column. Everything with no action is still ours to look at: the workflow
+    # has not found anything for GXO to do, so it is sitting with TLG.
+    action = (frame["action_needed_from_gxo"].astype(str).str.strip()
+              if "action_needed_from_gxo" in frame.columns
+              else pd.Series("", index=frame.index))
+    to_print = action.eq(ACTION_PRINT)
+    to_cancel = action.eq(ACTION_CANCEL)
+    with_tlg = ~(to_print | to_cancel)
 
     cells = st.columns(5)
     cells[0].metric("Shipments", len(frame))
     cells[1].metric("Fixed", int(fixed.sum()))
-    cells[2].metric("Still KO", int((~fixed).sum()))
-    cells[3].metric("Tried by GXO", int(tried.sum()))
-    # Fixed on paper but untouched by the warehouse since is the group worth
-    # chasing, so it gets a number of its own rather than a filter.
-    cells[4].metric("Fixed, not retried", int((fixed & ~tried_since).sum()))
-    if view == "full":
-        st.caption(
-            f"{int(in_latest.sum())} of these are in the latest workbook or "
-            f"gxo_ko import; {int(tried.sum())} have been tried at least once. "
-            "The GXO view is the union of those two."
-        )
+    cells[2].metric(ACTION_PRINT, int(to_print.sum()))
+    cells[3].metric("Cancellation requested", int(to_cancel.sum()))
+    cells[4].metric("Still checking on TLG side", int(with_tlg.sum()))
 
     with st.expander("Filters", expanded=False):
         shown = column_filters(frame, wanted_columns(frame, view))
