@@ -445,12 +445,16 @@ def tab_dashboard(config, username: str) -> None:
     to_cancel = action.eq(ACTION_CANCEL)
     with_tlg = ~(to_print | to_cancel)
 
-    cells = st.columns(5)
+    # Four numbers, and the last three add up to the first. ko_fixed had a
+    # metric of its own here and lost it: it is this workflow's verdict on the
+    # documents call, not a pile of work, and next to three counts of things
+    # somebody has to go and do it only invited the question of why the four
+    # did not reconcile.
+    cells = st.columns(4)
     cells[0].metric("Shipments", len(frame))
-    cells[1].metric("Fixed", int(fixed.sum()))
-    cells[2].metric(ACTION_PRINT, int(to_print.sum()))
-    cells[3].metric("Cancellation requested", int(to_cancel.sum()))
-    cells[4].metric("Still checking on TLG side", int(with_tlg.sum()))
+    cells[1].metric(ACTION_PRINT, int(to_print.sum()))
+    cells[2].metric("Cancellation requested", int(to_cancel.sum()))
+    cells[3].metric("Still checking on TLG side", int(with_tlg.sum()))
 
     with st.expander("Filters", expanded=False):
         shown = column_filters(frame, wanted_columns(frame, view))
