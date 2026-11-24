@@ -126,10 +126,7 @@ EVIDENCE_COLUMNS = [
     "logistic_order_number", "oms_shipment_number", "action",
     "location_provider", "ko_reason", "blocking_reason",
     "eligible_for_package_closure",
-    "label_shplbl_populated", "label_shplbl_format",
-    "label_retlbl_present", "label_retlbl_populated", "label_retlbl_format",
     "shipping_tracking_number", "return_tracking_number",
-    "doc_inv_populated", "doc_rpi_populated",
     "api_call_date", "batch", "last_run", "first_seen", "last_updated",
 ]
 
@@ -533,9 +530,10 @@ def breakdown(frame: pd.DataFrame, column: str, heading: str, limit: int = 12) -
 def tab_new_run(config, github: GitHub, username: str) -> None:
     st.markdown("#### Start a run")
     st.caption(
-        "Both files go into one commit, so the workflow starts once with the pair "
-        "already complete. It then checks every shipment against the documents API, "
-        "which takes a few minutes for a few hundred rows."
+        "Upload either file, or both. Whatever you upload goes into one commit, so "
+        "the workflow starts once with the batch already complete. It then checks "
+        "every shipment against the documents API, which takes a few minutes for a "
+        "few hundred rows."
     )
 
     left, right = st.columns(2)
@@ -556,24 +554,36 @@ def tab_new_run(config, github: GitHub, username: str) -> None:
     if xlsx_file is not None:
         st.caption(f"Workbook: **{xlsx_file.name}** · {xlsx_file.size / 1024 / 1024:.1f} MB")
 
-    ready = csv_file is not None and xlsx_file is not None
+    ready = csv_file is not None or xlsx_file is not None
     if not ready:
-        st.info("Both files are needed: the workflow will not start on one of them.")
+        st.info("Upload the CSV, the workbook, or both.")
+    elif csv_file is None:
+        # Worth saying plainly: the archiving rule turns on this, and a run
+        # that quietly archived nothing would look like a run that did nothing.
+        st.caption("Workbook only. GXO's shipments will be re-checked and any new "
+                   "ones added, but none will be archived for being absent — a "
+                   "missing CSV is not evidence that a shipment has gone.")
+    elif xlsx_file is None:
+        st.caption("CSV only. No GXO shipment will be archived for being absent, "
+                   "because that is only ever decided against a workbook.")
 
     if st.button("Queue the run", type="primary", disabled=not ready, use_container_width=True):
         batch = ko.stamp()
         user = "".join(character if character.isalnum() else "-" for character in username)[:40] or "user"
-        suffix = ".xlsm" if xlsx_file.name.lower().endswith(".xlsm") else ".xlsx"
-        files = [
-            (f"{config.input_dir}/{batch}__{user}__pending.csv", csv_file.getvalue()),
-            (f"{config.input_dir}/{batch}__{user}__check{suffix}", xlsx_file.getvalue()),
-        ]
-        with st.spinner("Committing both files…"):
+        files = []
+        if csv_file is not None:
+            files.append((f"{config.input_dir}/{batch}__{user}__pending.csv",
+                          csv_file.getvalue()))
+        if xlsx_file is not None:
+            suffix = ".xlsm" if xlsx_file.name.lower().endswith(".xlsm") else ".xlsx"
+            files.append((f"{config.input_dir}/{batch}__{user}__check{suffix}",
+                          xlsx_file.getvalue()))
+        with st.spinner(f"Committing {'both files' if len(files) == 2 else 'the file'}…"):
             sha, error = ko.commit_files(
                 github, files, f"KO monitoring batch {batch} from {username}"
             )
         if error:
-            st.error(f"The files could not be committed: {error}")
+            st.error(f"The upload could not be committed: {error}")
             return
         st.cache_data.clear()
         st.success(

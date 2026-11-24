@@ -68,15 +68,8 @@ COLUMNS: List[Tuple[str, str]] = [
     ("action_needed_from_gxo", "action_needed_from_gxo"),
     ("in_latest_gxo_input", "in_latest_gxo_input"),
     ("eligible_for_package_closure", "eligible_for_package_closure"),
-    ("label_shplbl_populated", "label_shplbl_populated"),
-    ("label_shplbl_format", "label_shplbl_format"),
-    ("label_retlbl_present", "label_retlbl_present"),
-    ("label_retlbl_populated", "label_retlbl_populated"),
-    ("label_retlbl_format", "label_retlbl_format"),
     ("shipping_tracking_number", "shipping_tracking_number"),
     ("return_tracking_number", "return_tracking_number"),
-    ("doc_inv_populated", "doc_inv_populated"),
-    ("doc_rpi_populated", "doc_rpi_populated"),
     ("api_call_date", "api_call_date"),
     ("batch", "batch"),
     # Bookkeeping, shown last.
@@ -89,8 +82,6 @@ BOOL_COLUMNS = {
     "ko_fixed", "ko_resolved", "tried_by_gxo_after_the_fix",
     "in_latest_gxo_input",
     "eligible_for_package_closure",
-    "label_shplbl_populated", "label_retlbl_present", "label_retlbl_populated",
-    "doc_inv_populated", "doc_rpi_populated",
 }
 
 TIMESTAMP_COLUMNS = {
