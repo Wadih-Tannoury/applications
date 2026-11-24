@@ -52,6 +52,7 @@ COLUMNS: List[Tuple[str, str]] = [
     ("action", "action"),
     ("fulfillment_status", "fulfillment_status"),
     ("location_provider", "location_provider"),
+    ("location_name", "location_name"),
     ("ko_fixed", "ko_fixed"),
     ("ko_fix_date", "ko_fix_date"),
     ("last_tried_by_gxo_date", "last_tried_by_gxo_date"),

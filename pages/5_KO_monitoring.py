@@ -88,6 +88,7 @@ DASHBOARD_COLUMNS = [
 # place. They are the columns you want when a row looks wrong, and noise on a
 # list meant for the warehouse — hence a view of its own.
 TROUBLESHOOTING_COLUMNS = DASHBOARD_COLUMNS + [
+    "location_name",
     "action",
     "ko_reason",
     "blocking_reason",
