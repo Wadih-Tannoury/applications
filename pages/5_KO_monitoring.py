@@ -71,9 +71,15 @@ DASHBOARD_COLUMNS = [
     "channel",
     "order_submit_date",
     "shipment_creation_date",
+<<<<<<< HEAD
+    # The live status only. GXO is being asked to act on what the shipment is
+    # doing now; the status it was logged in is this workflow's own history,
+    # and it is on the troubleshooting view instead.
+=======
     # The live status only. GXO is being asked to act on what the
     # shipment is doing now; the status it was logged in is this
     # workflow's own history, and it is on the troubleshooting view.
+>>>>>>> main
     "updated_fulfillment_status",
     "source",
     "gxo_result_code",
@@ -91,9 +97,15 @@ DASHBOARD_COLUMNS = [
 # place. They are the columns you want when a row looks wrong, and noise on a
 # list meant for the warehouse — hence a view of its own.
 TROUBLESHOOTING_COLUMNS = DASHBOARD_COLUMNS + [
+<<<<<<< HEAD
+    # The other half of the pair. Beside updated_fulfillment_status it is the
+    # diagnosis: a shipment logged in one status and sitting in another has
+    # moved on, and one that has not moved at all is a different problem.
+=======
     # The other half of the pair. Beside updated_fulfillment_status it
     # is the diagnosis: a shipment logged in one status and sitting in
     # another has moved on; one that has not moved is another problem.
+>>>>>>> main
     "initial_fulfillment_status",
     "location_name",
     "action",
