@@ -1,48 +1,46 @@
 #!/usr/bin/env python3
 """
-Cancellation ledger console.
+The Warehouse Cancellation Dashboard, as a tab.
 
 Shows `tlg-business-intelligence-prd`.til.warehouse_orders_cancellation_table —
 every shipment the operational_tools repository has cancelled at the GXO
 warehouse, and what became of it since.
 
-This page is read-only. It queues nothing, sends nothing and writes nothing; it
-is the window onto what the two cancellation workflows have done. The table is
-read afresh on every run of this script, which Streamlit does on sign-in, on
-refresh and whenever a filter here changes, so what is on screen is what
+This used to be a page of its own. It is a tab of the warehouse cancellation
+console instead, because queueing a cancellation and watching what happened to
+it are the same job, and having them on two pages meant leaving one to check
+the other. Nothing about what it reads has changed.
+
+Read-only throughout: it queues nothing, sends nothing and writes nothing. The
+table is read afresh every time Streamlit runs the script — on sign-in, on
+refresh, and whenever a filter here changes — so what is on screen is what
 BigQuery holds at that moment rather than something cached from earlier.
 
-The ledger fills in three stages, and the Stage column says which one a shipment
-has reached:
+The ledger fills in three stages, and the Stage column says which one a
+shipment has reached:
 
     Not sent               the cancellation never left for the warehouse
     Awaiting the warehouse sent, no CANCELLED event back yet
     To cancel in Kibo      the warehouse confirmed it; Kibo is still open
     Done                   cancelled at the warehouse and in Kibo
 
-A row still awaiting the warehouse after 24 hours is marked overdue: that is the
-same window the Reconcile cancellations workflow uses, so an overdue row here is
-one that workflow will resend on its next run.
+A row still awaiting the warehouse after 24 hours is marked overdue: the same
+window the Reconcile cancellations workflow uses, so an overdue row here is one
+that workflow will resend on its next run.
 """
 from __future__ import annotations
 
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List
 
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from shared.console import rows_to_csv, start_page  # noqa: E402
-from shared import ledger as ledger_module  # noqa: E402
-from shared.ledger import (  # noqa: E402
+from shared.console import rows_to_csv
+from shared.ledger import (
     COLUMNS, FQN, TIMESTAMP_COLUMNS, fetch_rows, overdue, stage_of, summarise,
 )
 
-APP_KEY = "ledger"
-LABEL = "Cancellation ledger"
+LABEL = "Warehouse Cancellation Dashboard"
 
 STAGES = ["Not sent", "Awaiting the warehouse", "To cancel in Kibo", "Done"]
 
@@ -53,9 +51,8 @@ WINDOWS = {
     "Everything": 0,
 }
 
-
 def show_timestamp(value: Any) -> str:
-    """A timestamp as the page shows it: minutes, UTC, no microseconds."""
+    """A timestamp as the tab shows it: minutes, UTC, no microseconds."""
     if not isinstance(value, datetime):
         return "" if value is None else str(value)
     if value.tzinfo is None:
@@ -73,7 +70,7 @@ def display_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     Booleans become yes/no and timestamps become minutes so the columns stay
     narrow enough to read across, and Stage is put first because it is the
-    column anyone opening this page is actually looking for.
+    column anyone opening this tab is actually looking for.
     """
     shown: List[Dict[str, Any]] = []
     for row in rows:
@@ -92,28 +89,33 @@ def display_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return shown
 
 
-def main() -> None:
-    # set_page_config lives in streamlit_app.py: it runs once for the session,
-    # and this file is one page of that app.
-    start_page(
-        "Cancellation ledger",
-        caption=f"{FQN} · read-only · re-read on every refresh",
-        app_key=APP_KEY,
-        label=LABEL,
-    )
+def render(key_prefix: str = "ledger") -> None:
+    """
+    Draw the dashboard.
+
+    `key_prefix` keeps the widget keys apart from anything else on the page, so
+    this can sit beside the upload and single-cancellation tabs — and on the
+    staging page as well — without two widgets claiming the same key.
+    """
+    st.markdown("#### The cancellation ledger")
+    st.caption(f"{FQN} · read-only · re-read on every refresh")
 
     controls_left, controls_middle, controls_right = st.columns([2, 3, 1])
-    window = controls_left.selectbox("Period", list(WINDOWS), index=1,
-                                     help="Filtered on the row's last update.")
+    window = controls_left.selectbox(
+        "Period", list(WINDOWS), index=1, key=f"{key_prefix}_window",
+        help="Filtered on the row's last update.",
+    )
     search = controls_middle.text_input(
         "Search", placeholder="Shipment number or item code",
+        key=f"{key_prefix}_search",
         help="Matches part of a shipmentOrderNumber or of the items column.",
     )
     controls_right.write("")
     # Streamlit re-runs the script on every refresh, so the table is already
-    # current when the page loads. The button is here for someone watching a
+    # current when the tab loads. The button is here for someone watching a
     # cancellation move through the stages without touching anything else.
-    controls_right.button("Refresh", use_container_width=True)
+    controls_right.button("Refresh", use_container_width=True,
+                          key=f"{key_prefix}_refresh")
 
     result = fetch_rows(days=WINDOWS[window], search=search)
 
@@ -135,7 +137,7 @@ def main() -> None:
 
     rows = result.rows
     stage_filter = st.multiselect(
-        "Stage", STAGES, default=[],
+        "Stage", STAGES, default=[], key=f"{key_prefix}_stage",
         help="Leave empty to show every stage.",
     )
     if stage_filter:
@@ -176,6 +178,7 @@ def main() -> None:
             file_name=f"cancellation-ledger-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.csv",
             mime="text/csv",
             use_container_width=True,
+            key=f"{key_prefix}_download",
         )
 
     with st.expander("What the stages mean"):
@@ -197,7 +200,3 @@ shipment is in `READY`, `BACKORDER` or `CUSTOMER_CARE`.
 this row.
             """
         )
-
-
-# This file is a page of streamlit_app.py, so it runs on import by st.navigation.
-main()

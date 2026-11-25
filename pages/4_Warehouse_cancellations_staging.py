@@ -14,9 +14,9 @@ direction:
 
     cp pages/4_Warehouse_cancellations_staging.py pages/2_Warehouse_cancellations.py
 
-and then putting back the four lines that differ — the docstring, APP_KEY,
-STAGING and the start_page call at the bottom. They are marked `STAGING:` below
-so they are easy to find.
+and then putting back the lines that differ — the docstring, APP_KEY, STAGING
+and the start_page call at the bottom. They are marked `STAGING:` below so they
+are easy to find.
 
 **This page writes to the live queue.** A cancellation submitted here lands in
 warehouse/input/ on the same branch as the live page, the production workflow
@@ -26,10 +26,37 @@ here is a real cancellation, and the banner on the page says so. Point it
 somewhere else by adding a `[warehouse_staging]` section to the secrets with its
 own `repo`, `branch` or folders; with no such section it follows the live page.
 
-What the page does, unchanged from the live one: the warehouse event stops a
-whole shipment, carries no products and never touches Kibo. Every row is queued
-with cancelInKibo=no and a fixed reasonMessage, so there is nothing to fill in
-but the shipment number.
+What the page does, unchanged from the live one:
+
+Drops cancellation CSV files into the warehouse queue of the operational_tools
+repository (warehouse/input/), where the Warehouse cancellations workflow picks
+them up and sends a CANCEL event to the GXO endpoint, and reads the run logs
+back out.
+
+This console cancels at the warehouse and nowhere else. Every row is queued
+with cancelInKibo=no, so the shipment stays exactly as it is in Kibo whatever
+the workflow's own Kibo switch is set to; cancelling in Kibo is the Kibo
+cancellations page's job.
+
+Two things are asked for: the shipment number, and why it is being cancelled.
+The warehouse event itself carries a fixed reasonMessage — the warehouse has no
+use for a per-shipment explanation — but reasonCode and moreInfo are written to
+the cancellation ledger, and the reconciler reads them back hours later when it
+cancels the shipment in Kibo. So the reason chosen here is the reason Kibo
+ends up recording.
+
+moreInfo is optional and goes to Kibo empty when nobody fills it in, except on
+"Other", where an empty moreInfo would tell Kibo nothing: there it is sent as
+"Other" too.
+
+The **Warehouse Cancellation Dashboard** tab is the cancellation ledger, which
+used to be a page of its own: queueing a cancellation and watching what became
+of it are the same job, and having them apart meant leaving one to check the
+other. It is read-only.
+
+The warehouse event stops a whole shipment and carries an empty products array:
+it has no item granularity, so this console deals in shipments only. Cancelling
+a single item is the Kibo cancellations page's job too.
 """
 from __future__ import annotations
 
@@ -41,6 +68,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from shared import ledger_view  # noqa: E402
 from shared.console import (  # noqa: E402
     GitHub,
     parse_uploaded_csv,
@@ -56,7 +84,6 @@ from shared.console import (  # noqa: E402
 APP_KEY = "warehouse_staging"
 STAGING = True
 LABEL = "Warehouse cancellations (staging)"
-
 DEFAULT_FOLDERS = {
     "input_dir": "warehouse/input",
     "logs_dir": "warehouse/logs",
@@ -64,13 +91,41 @@ DEFAULT_FOLDERS = {
     "error_dir": "warehouse/error",
 }
 
-CSV_COLUMNS = ["shipmentOrderNumber", "cancelInKibo"]
+CSV_COLUMNS = ["shipmentOrderNumber", "cancelInKibo", "reasonCode", "moreInfo"]
 
 ALIASES = {
     "shipmentordernumber": "shipmentOrderNumber",
     "shipmentorder": "shipmentOrderNumber",
     "son": "shipmentOrderNumber",
+    "reasoncode": "reasonCode",
+    "reason": "reasonCode",
+    "cancellationreason": "reasonCode",
+    "moreinfo": "moreInfo",
+    "info": "moreInfo",
+    "notes": "moreInfo",
 }
+
+# The reasons Kibo accepts. The same list the workers hold, and the only values
+# this console will queue: a CSV naming anything else is refused here rather
+# than rejected by Kibo hours later.
+REASON_CODES = [
+    "Arrived Too Late",
+    "Can Not Find Item",
+    "Customer Changed Their Mind",
+    "Damaged Or Defective Item",
+    "Do Not Have Enough Quantity",
+    "Found Better Price",
+    "Item Did Not Match Website",
+    "Item Is On Reserve For Other Customer",
+    "Item Is Shop Worn Not Web Sellable",
+    "Item Not Available",
+    "Item Price Too High",
+    "Need To Change Payment Method",
+    "No Inventory",
+    "Other",
+]
+
+OTHER_REASON = "Other"
 
 # Written on every row. The worker reads yes / no, and this console only ever
 # says no: what it queues is a warehouse cancellation, full stop.
@@ -82,6 +137,22 @@ CANCEL_IN_KIBO = "no"
 FIXED_REASON_MESSAGE = "Cancelled"
 
 BUTTON = "Cancel at the warehouse"
+
+
+def scope_note() -> None:
+    """What this page does and does not touch."""
+    st.info(
+        "The warehouse event stops a **whole shipment**: it carries no products, so there "
+        "is no way to stop part of one, and nothing is cancelled in Kibo. To cancel a "
+        "single item, or to cancel in Kibo, use the **Kibo cancellations** page — the "
+        "warehouse keeps packing whatever is left.",
+        icon="📦",
+    )
+    st.caption(
+        f"The warehouse event always goes out with reasonMessage “{FIXED_REASON_MESSAGE}”; "
+        "it is not asked for here. The reason code below is what Kibo records when the "
+        "shipment is cancelled there."
+    )
 
 
 def staging_note(config) -> None:
@@ -100,25 +171,22 @@ def staging_note(config) -> None:
     )
 
 
-def scope_note() -> None:
-    """What this page does and does not touch."""
-    st.info(
-        "The warehouse event stops a **whole shipment**: it carries no products, so there "
-        "is no way to stop part of one, and nothing is cancelled in Kibo. To cancel a "
-        "single item, or to cancel in Kibo, use the **Kibo cancellations** page — the "
-        "warehouse keeps packing whatever is left.",
-        icon="📦",
-    )
-    st.caption(
-        f"The warehouse event always goes out with reasonMessage “{FIXED_REASON_MESSAGE}”; "
-        "it is not asked for here."
-    )
+def apply_scope(rows: List[Dict[str, str]], reason_code: str = "",
+                more_info: str = "") -> List[Dict[str, str]]:
+    """
+    Queue every row as a warehouse-only cancellation, with a reason on it.
 
-
-def apply_scope(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    """Queue every row as a warehouse-only cancellation."""
+    A row that names its own reasonCode keeps it; the rest take the one chosen
+    on the page, so a plain one-column CSV still works.
+    """
     for row in rows:
         row["cancelInKibo"] = CANCEL_IN_KIBO
+        row["reasonCode"] = (row.get("reasonCode") or reason_code).strip()
+        row["moreInfo"] = (row.get("moreInfo") or more_info).strip()
+        # An "Other" with nothing beside it tells Kibo nothing, so it carries
+        # the word itself.
+        if row["reasonCode"] == OTHER_REASON and not row["moreInfo"]:
+            row["moreInfo"] = OTHER_REASON
     return rows
 
 
@@ -129,20 +197,45 @@ def missing_required(rows: List[Dict[str, str]]) -> List[str]:
     shipmentOrderNumber is what the warehouse cancellation is keyed on, so a
     row without one is refused here rather than queued to fail in the workflow.
     """
-    return [
+    problems = [
         f"Record {position} is missing shipmentOrderNumber."
         for position, row in enumerate(rows, start=1)
         if not row.get("shipmentOrderNumber")
     ]
+    problems += [
+        f"Record {position} has no reasonCode."
+        for position, row in enumerate(rows, start=1)
+        if not row.get("reasonCode")
+    ]
+    # A reason Kibo does not know would be refused hours later, by the
+    # reconciler, where nobody is watching. Better to refuse it here.
+    problems += [
+        f"Record {position} has reasonCode “{row['reasonCode']}”, which is not one "
+        "of the accepted reasons."
+        for position, row in enumerate(rows, start=1)
+        if row.get("reasonCode") and row["reasonCode"] not in REASON_CODES
+    ]
+    return problems
 
 
 def tab_upload(github: GitHub, config, username: str) -> None:
     st.markdown("#### Upload a CSV")
     st.caption(
-        "One column: shipmentOrderNumber. Every row cancels the whole shipment at the "
-        "warehouse."
+        "One column is enough: shipmentOrderNumber. Every row cancels the whole shipment "
+        "at the warehouse, with the reason chosen below."
     )
     scope_note()
+
+    left, right = st.columns([1, 1])
+    reason_code = left.selectbox(
+        "Reason code", REASON_CODES, index=None, placeholder="Choose a reason…",
+        help="Applies to every row that does not carry its own reasonCode column.",
+    )
+    more_info = right.text_input(
+        "More info (optional)", placeholder="Anything Kibo should record beside the reason",
+    )
+    if reason_code == OTHER_REASON and not more_info.strip():
+        st.caption("“Other” with nothing beside it is sent to Kibo as moreInfo “Other”.")
 
     uploaded = st.file_uploader("CSV file", type=["csv", "txt"], label_visibility="collapsed")
     if uploaded is None:
@@ -152,6 +245,17 @@ def tab_upload(github: GitHub, config, username: str) -> None:
                 "OW-USA00037769\n"
                 "OW-USA00037770\n"
                 "DJ-ITA00012345\n",
+                language="text",
+            )
+            st.caption(
+                "A file can also carry its own reasonCode and moreInfo columns, which "
+                "take priority over the choice above — useful when one upload covers "
+                "several reasons."
+            )
+            st.code(
+                "shipmentOrderNumber,reasonCode,moreInfo\n"
+                "OW-USA00037769,No Inventory,\n"
+                "DJ-ITA00012345,Other,Chargeback opened\n",
                 language="text",
             )
         return
@@ -169,7 +273,13 @@ def tab_upload(github: GitHub, config, username: str) -> None:
     if not rows:
         return
 
-    rows = apply_scope(rows)
+    rows = apply_scope(rows, reason_code or "", more_info)
+
+    if not reason_code and any(not row.get("reasonCode") for row in rows):
+        st.warning(
+            "Choose a reason code above, or give the file its own reasonCode column. "
+            "Nothing is queued without one."
+        )
 
     st.dataframe(rows, use_container_width=True, hide_index=True)
     st.caption(f"{len(rows)} shipment(s) ready to cancel in full at the warehouse.")
@@ -197,6 +307,14 @@ def tab_single(github: GitHub, config, username: str) -> None:
         shipment_order_number = st.text_input(
             "shipmentOrderNumber", placeholder="OW-USA00037769"
         )
+        reason_code = st.selectbox(
+            "Reason code", REASON_CODES, index=None, placeholder="Choose a reason…",
+            help="What Kibo records when the shipment is cancelled there.",
+        )
+        more_info = st.text_input(
+            "More info (optional)",
+            placeholder="Anything Kibo should record beside the reason",
+        )
         submitted = st.form_submit_button(BUTTON, type="primary")
 
     if not submitted:
@@ -206,16 +324,20 @@ def tab_single(github: GitHub, config, username: str) -> None:
     if not shipment_order_number:
         st.error("Enter a shipmentOrderNumber.")
         return
+    if not reason_code:
+        st.error("Choose a reason code.")
+        return
+
+    rows = apply_scope(
+        [{"shipmentOrderNumber": shipment_order_number}], reason_code, more_info
+    )
+    if rows[0]["moreInfo"] == OTHER_REASON and not more_info.strip():
+        st.caption("No more info given, so Kibo receives moreInfo “Other”.")
 
     submit_rows(
         github,
         config,
-        [
-            {
-                "shipmentOrderNumber": shipment_order_number,
-                "cancelInKibo": CANCEL_IN_KIBO,
-            }
-        ],
+        rows,
         CSV_COLUMNS,
         username,
         "shipment",
@@ -234,9 +356,13 @@ def main() -> None:
     github = GitHub(config)
     staging_note(config)
 
-    upload, single, logs, queue = st.tabs(
-        ["Upload CSV", "Single cancellation", "Logs", "Folders"]
+    dashboard, upload, single, logs, queue = st.tabs(
+        [ledger_view.LABEL, "Upload CSV", "Single cancellation", "Logs", "Folders"]
     )
+    # The dashboard comes first: most visits are to see what became of a
+    # cancellation, not to raise one.
+    with dashboard:
+        ledger_view.render("warehouse_staging_ledger")
     with upload:
         tab_upload(github, config, username)
     with single:
