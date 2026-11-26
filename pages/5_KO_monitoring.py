@@ -71,9 +71,9 @@ DASHBOARD_COLUMNS = [
     "channel",
     "order_submit_date",
     "shipment_creation_date",
-    # The live status only. GXO is being asked to act on what the
-    # shipment is doing now; the status it was logged in is this
-    # workflow's own history, and it is on the troubleshooting view.
+    # The live status only. GXO is being asked to act on what the shipment is
+    # doing now; the status it was logged in is this workflow's own history,
+    # and it is on the troubleshooting view instead.
     "updated_fulfillment_status",
     "source",
     "gxo_result_code",
@@ -86,20 +86,25 @@ DASHBOARD_COLUMNS = [
 
 # The troubleshooting view's columns: the dashboard's, plus the four that say
 # why a shipment is where it is. action and ko_reason are this workflow's own
-# account of the last thing it did; blocking_reason is the monitoring table's;
-# ko_source says which of them put the shipment in the table in the first
+# account of the last thing it did; mon_blocking_reason is the monitoring table's;
+# mon_ko_source says which of them put the shipment in the table in the first
 # place. They are the columns you want when a row looks wrong, and noise on a
 # list meant for the warehouse — hence a view of its own.
 TROUBLESHOOTING_COLUMNS = DASHBOARD_COLUMNS + [
-    # The other half of the pair. Beside updated_fulfillment_status it
-    # is the diagnosis: a shipment logged in one status and sitting in
-    # another has moved on; one that has not moved is another problem.
+    # The other half of the pair. Beside updated_fulfillment_status it is the
+    # diagnosis: a shipment logged in one status and sitting in another has
+    # moved on, and one that has not moved at all is a different problem.
     "initial_fulfillment_status",
     "location_name",
     "action",
     "ko_reason",
-    "blocking_reason",
-    "ko_source",
+    "mon_blocking_reason",
+    "mon_ko_source",
+    "mon_external_error_message",
+    "mon_error_message",
+    "b2c_action",
+    "gxo_ko_reason",
+    "docs_reason",
 ]
 
 # What the warehouse has been asked to do, exactly as the workflow writes it
@@ -145,7 +150,7 @@ HEADLINE_COLUMNS = [
 EVIDENCE_COLUMNS = [
     "ko_resolved", "ko_resolved_date", "in_latest_gxo_input",
     "logistic_order_number", "oms_shipment_number", "action",
-    "location_provider", "ko_reason", "blocking_reason",
+    "location_provider", "ko_reason", "mon_blocking_reason",
     "eligible_for_package_closure",
     "shipping_tracking_number", "return_tracking_number",
     "api_call_date", "batch", "last_run", "first_seen", "last_updated",
@@ -397,8 +402,8 @@ def tab_dashboard(config, username: str) -> None:
     if view != "debug":
         if "ko_resolved" in frame.columns:
             frame = frame[~truthy(frame, "ko_resolved")]
-        if "blocking_reason" in frame.columns:
-            frame = frame[~frame["blocking_reason"].astype(str).str.strip()
+        if "mon_blocking_reason" in frame.columns:
+            frame = frame[~frame["mon_blocking_reason"].astype(str).str.strip()
                           .str.startswith(STOCK_RESERVED)]
 
     if view == "tlg":
