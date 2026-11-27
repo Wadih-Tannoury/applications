@@ -60,9 +60,14 @@ from shared import ko_table  # noqa: E402
 APP_KEY = "ko_monitoring"
 LABEL = "KO monitoring"
 
-# The dashboard's own columns, in the order they were asked for. Both views
-# show these; everything else in the table is behind "Show the evidence
-# columns".
+# GXO's list: every shipment still open at the warehouse, and only the
+# columns somebody there needs to act on it. Deliberately short. Everything
+# that explains how a row got here — the statuses it passed through, which
+# feed reported it, what each source said the reason was — belongs on the
+# troubleshooting view, and is noise on a worklist.
+#
+# updated_fulfillment_status is the live one: GXO is being asked about what
+# the shipment is doing now, not what it was doing when it was logged.
 DASHBOARD_COLUMNS = [
     "shipment_order_number",
     "oerodp",
@@ -71,9 +76,28 @@ DASHBOARD_COLUMNS = [
     "channel",
     "order_submit_date",
     "shipment_creation_date",
-    # The live status only. GXO is being asked to act on what the shipment is
-    # doing now; the status it was logged in is this workflow's own history,
-    # and it is on the troubleshooting view instead.
+    "updated_fulfillment_status",
+    "ko_fixed",
+    "last_tried_by_gxo_date",
+    "ko_fix_date",
+    "action_needed_from_gxo",
+]
+
+# The troubleshooting view: everything, listed in full rather than built from
+# the list above. The two views answer different questions and no longer move
+# together — shortening GXO's list must not quietly shorten this one.
+TROUBLESHOOTING_COLUMNS = [
+    "shipment_order_number",
+    "oerodp",
+    "ub_imko",
+    "brand",
+    "channel",
+    "order_submit_date",
+    "shipment_creation_date",
+    # Both statuses, side by side: a shipment logged in one and sitting in
+    # another has moved on, and one that has not moved at all is a different
+    # problem.
+    "initial_fulfillment_status",
     "updated_fulfillment_status",
     "source",
     "gxo_result_code",
@@ -82,22 +106,10 @@ DASHBOARD_COLUMNS = [
     "ko_fix_date",
     "tried_by_gxo_after_the_fix",
     "action_needed_from_gxo",
-]
-
-# The troubleshooting view's columns: the dashboard's, plus the four that say
-# why a shipment is where it is. action and ko_reason are this workflow's own
-# account of the last thing it did; mon_blocking_reason is the monitoring table's;
-# mon_ko_source says which of them put the shipment in the table in the first
-# place. They are the columns you want when a row looks wrong, and noise on a
-# list meant for the warehouse — hence a view of its own.
-TROUBLESHOOTING_COLUMNS = DASHBOARD_COLUMNS + [
-    # The other half of the pair. Beside updated_fulfillment_status it is the
-    # diagnosis: a shipment logged in one status and sitting in another has
-    # moved on, and one that has not moved at all is a different problem.
-    "initial_fulfillment_status",
     "location_name",
     "action",
     "ko_reason",
+    # One column per place a KO reason can come from, never reconciled.
     "mon_blocking_reason",
     "mon_ko_source",
     "mon_external_error_message",
